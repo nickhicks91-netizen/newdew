@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive 3D Heart Simulator - Phase 2 Biohybrid</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.1/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #111827; color: #f3f4f6; }
+        .telemetry-card { background-color: #1f2937; border-radius: 0.75rem; padding: 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1); }
+        .switch { position: relative; display: inline-block; width: 40px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #4b5563; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #3b82f6; }
+        input:checked + .slider:before { transform: translateX(16px); }
+        #canvasContainer > canvas { display: block; width: 100%; height: 100%; }
+        .validation-text { font-size: 0.8rem; text-align: center; margin-top: 0.5rem; }
+    </style>
+</head>
+<body class="flex flex-col md:flex-row items-stretch justify-center min-h-screen p-4 gap-4">
+
+    <!-- Left Panel: Controls -->
+    <div class="w-full md:w-1/4 xl:w-1/5 bg-gray-800 rounded-2xl shadow-2xl p-6 flex flex-col gap-6 order-1 md:order-none">
+        <h2 class="text-2xl font-bold text-white text-center">Controls</h2>
+        <div class="space-y-4">
+            <div>
+                <label for="hrSlider" class="flex justify-between font-medium text-gray-300"><span>Heart Rate</span><span id="hrValue" class="font-bold text-blue-400">70 BPM</span></label>
+                <input id="hrSlider" type="range" min="40" max="120" value="70" step="1" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+            </div>
+            <div>
+                <label for="svrSlider" class="flex justify-between font-medium text-gray-300"><span>Vascular Res (SVR)</span><span id="svrValue" class="font-bold text-blue-400">1200</span></label>
+                <input id="svrSlider" type="range" min="800" max="1600" value="1200" step="50" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+            </div>
+             <div class="border-t border-gray-700 pt-4 mt-4">
+                <h3 class="text-lg font-bold text-center text-purple-400 mb-2">Biohybrid Control</h3>
+                <div class="flex justify-between items-center">
+                    <span class="font-medium text-gray-300">Baroreflex</span>
+                    <label class="switch"><input type="checkbox" id="baroreflexToggle"><span class="slider"></span></label>
+                </div>
+            </div>
+            <div class="border-t border-gray-700 pt-4 mt-4">
+                <h3 class="text-lg font-bold text-center text-green-400 mb-2">Benchmarking</h3>
+                <div class="flex justify-between items-center">
+                    <span class="font-medium text-gray-300">Validate vs. BiVACOR</span>
+                    <label class="switch"><input type="checkbox" id="validateToggle"><span class="slider"></span></label>
+                </div>
+                <div id="validation-display" class="hidden validation-text text-green-400"></div>
+            </div>
+             <div class="border-t border-gray-700 pt-4 mt-4">
+                <h3 class="text-lg font-bold text-center text-purple-400 mb-2">Hardware Interface</h3>
+                 <div class="flex justify-between items-center">
+                    <span class="font-medium text-gray-300">Phantom Flow Mode</span>
+                    <label class="switch"><input type="checkbox" id="phantomModeToggle"><span class="slider"></span></label>
+                </div>
+                <button id="exportButton" class="w-full mt-4 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Export for Actuator</button>
+            </div>
+            <div class="flex justify-between items-center pt-2">
+                <span class="font-medium text-gray-300">Colorize Chambers</span>
+                <label class="switch"><input type="checkbox" id="chamberViewToggle"><span class="slider"></span></label>
+            </div>
+        </div>
+        <div class="flex-grow"></div>
+        <div class="flex items-center gap-4">
+             <button id="playPauseButton" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Pause</button>
+             <button id="resetButton" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Reset</button>
+        </div>
+    </div>
+
+    <!-- Center Panel: 3D Visualization -->
+    <div class="w-full md:w-1/2 xl:w-1/2 bg-gray-800 rounded-2xl shadow-2xl p-4 flex flex-col items-center order-first md:order-none">
+        <h1 class="text-3xl font-bold text-white mb-2">Harmonic Heart - Biohybrid Digital Twin (TRL 5)</h1>
+        <div id="canvasContainer" class="w-full flex-grow relative"></div>
+    </div>
+
+    <!-- Right Panel: Telemetry -->
+    <div class="w-full md:w-1/4 xl:w-1/5 bg-gray-800 rounded-2xl shadow-2xl p-6 flex flex-col gap-4 order-2 md:order-none">
+        <h2 class="text-2xl font-bold text-white text-center">Live Telemetry</h2>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-lg text-red-400">Heart Rate</span>
+            <span id="hrDisplay" class="font-mono text-2xl font-bold text-white">-- BPM</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-lg text-green-400">Cardiac Output</span>
+            <span id="coDisplay" class="font-mono text-2xl font-bold text-white">-- L/min</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-lg text-purple-400">Blood Pressure</span>
+            <span id="bpDisplay" class="font-mono text-xl font-bold text-white">--/--</span>
+        </div>
+        <div class="telemetry-card flex-grow">
+             <canvas id="telemetryCanvas"></canvas>
+        </div>
+    </div>
+
+<script>
+window.onload = function() {
+    let scene, camera, renderer, controls, nodeMesh, telemetryChart, phantomFlowField;
+    let heartModel, liveSim, animationFrameId;
+    let lastTimestamp = 0;
+    let isPaused = false, isChamberView = false, isPhantomMode = false, isValidateMode = false;
+    let exportBuffer = [];
+
+    const dom = {
+        canvasContainer: document.getElementById('canvasContainer'),
+        telemetryCanvas: document.getElementById('telemetryCanvas'),
+        hrSlider: document.getElementById('hrSlider'),
+        svrSlider: document.getElementById('svrSlider'),
+        baroreflexToggle: document.getElementById('baroreflexToggle'),
+        validateToggle: document.getElementById('validateToggle'),
+        validationDisplay: document.getElementById('validation-display'),
+        phantomModeToggle: document.getElementById('phantomModeToggle'),
+        exportButton: document.getElementById('exportButton'),
+        chamberViewToggle: document.getElementById('chamberViewToggle'),
+        hrValue: document.getElementById('hrValue'),
+        svrValue: document.getElementById('svrValue'),
+        playPauseButton: document.getElementById('playPauseButton'),
+        resetButton: document.getElementById('resetButton'),
+        hrDisplay: document.getElementById('hrDisplay'),
+        coDisplay: document.getElementById('coDisplay'),
+        bpDisplay: document.getElementById('bpDisplay'),
+    };
+
+    const SimConfig = { dt: 0.005, base_I0_SA: 0.62, noise_pct: 0.0, svr: 1200, target_map: 90, baro_sensitivity: 1.0 };
+    const ChamberColors = { RA: new THREE.Color("#3b82f6"), LA: new THREE.Color("#8b5cf6"), RV: new THREE.Color("#22c55e"), LV: new THREE.Color("#eab308") };
+    const BIVACOR_BENCHMARK = { hr: [50, 60, 70, 80, 90, 100, 110, 120], co: [3.5, 4.2, 4.8, 5.3, 5.7, 6.0, 6.1, 6.0] };
+
+    const vec = {
+        norm: v => Math.sqrt(v.reduce((s, x) => s + x * x, 0)),
+        dist: (v1, v2) => Math.sqrt(v1.reduce((s, c, i) => s + (c - v2[i]) ** 2, 0)),
+        argmin: (arr, func) => arr.reduce((best, current, i) => func(current) < best.val ? {val: func(current), idx: i} : best, {val: Infinity, idx: -1}).idx,
+        argmax: (arr, func) => arr.reduce((best, current, i) => func(current) > best.val ? {val: func(current), idx: i} : best, {val: -Infinity, idx: -1}).idx
+    };
+
+    function icosahedron() {
+        const phi = (1 + Math.sqrt(5)) / 2;
+        const raw = [[0,1,phi],[0,-1,phi],[0,1,-phi],[0,-1,-phi],[1,phi,0],[-1,phi,0],[1,-phi,0],[-1,-phi,0],[phi,0,1],[phi,0,-1],[-phi,0,1],[-phi,0,-1]];
+        const V = raw.map(v => { const n = vec.norm(v); return v.map(c => c / n); });
+        const edgeLen = vec.dist(V[0], V[4]);
+        const edges = [], faces = [];
+        for (let i=0; i<12; i++) for (let j=i+1; j<12; j++) {
+            if (Math.abs(vec.dist(V[i], V[j]) - edgeLen) < 1e-3) edges.push([i,j]);
+            for (let k=j+1; k<12; k++) if (Math.abs(vec.dist(V[i],V[j])-edgeLen)<1e-3 && Math.abs(vec.dist(V[j],V[k])-edgeLen)<1e-3 && Math.abs(vec.dist(V[i],V[k])-edgeLen)<1e-3) faces.push([i,j,k]);
+        }
+        return { V, edges, faces: faces.sort() };
+    }
+
+    class HeartModel {
+        constructor() { this._build_chambers(); }
+        _build_chambers() {
+            const geom = icosahedron();
+            const place = (V, off, s) => V.map(v => v.map((c, i) => c * s + off[i]));
+            const n = geom.V.length;
+
+            const RA_V = place(geom.V, [0.6, 0, 0.6], 0.5);
+            const LA_V = place(geom.V, [-0.6, 0, 0.6], 0.5);
+            const RV_V = place(geom.V, [0.7, 0, -0.3], 0.7);
+            const LV_V = place(geom.V, [-0.7, 0, -0.3], 0.7);
+
+            const offsets = { RA: 0, LA: n, RV: n * 2, LV: n * 3 };
+            this.V_all = [...RA_V, ...LA_V, ...RV_V, ...LV_V];
+            this.N = this.V_all.length;
+            this.adj = Array.from({ length: this.N }, () => []);
+            for(let ch=0; ch<4; ch++){
+                const offset = ch * n;
+                geom.edges.forEach(([i,j]) => {
+                    this.adj[offset+i].push(offset+j);
+                    this.adj[offset+j].push(offset+i);
+                });
+            }
+            this.adj[vec.argmax(RA_V, v => v[2]) + offsets.RA].push(offsets.LA + vec.argmax(LA_V, v => v[2]));
+            this.adj[offsets.LA + vec.argmax(LA_V, v => v[2])].push(vec.argmax(RA_V, v => v[2]) + offsets.RA);
+            this.adj[vec.argmin(RA_V, v => v[2]) + offsets.RA].push(offsets.RV + vec.argmax(RV_V, v => v[2]));
+            this.adj[offsets.RV + vec.argmax(RV_V, v => v[2])].push(vec.argmin(RA_V, v => v[2]) + offsets.RA);
+            this.adj[offsets.LA + vec.argmin(LA_V, v => v[2])].push(offsets.LV + vec.argmax(LV_V, v => v[2]));
+            this.adj[offsets.LV + vec.argmax(LV_V, v => v[2])].push(offsets.LA + vec.argmin(LA_V, v => v[2]));
+
+            this.meta = { n, offsets };
+        }
+    }
+
+    class LiveSim {
+        constructor(model) {
+            this.model = model; this.N = model.N;
+            this.v = new Array(this.N).fill(0).map(() => Math.random()*0.2-0.1);
+            this.w = new Array(this.N).fill(0).map(() => Math.random()*0.2-0.1);
+            this.I0 = new Array(this.N).fill(0.3);
+            this.I0[this.model.meta.offsets.RA] = SimConfig.base_I0_SA;
+            this.hr_history = []; this.co_history = []; this.map = SimConfig.target_map;
+        }
+        step(t, isBaroreflexOn) {
+            const { dt } = SimConfig;
+            if (isBaroreflexOn) {
+                const map_error = SimConfig.target_map - this.map;
+                const baro_adjust = map_error * 0.002 * SimConfig.baro_sensitivity;
+                this.I0[0] = Math.max(0.45, Math.min(0.8, SimConfig.base_I0_SA - baro_adjust));
+            } else { this.I0[0] = SimConfig.base_I0_SA; }
+
+            const v_new = this.v.slice(), w_new = this.w.slice();
+            for (let i = 0; i < this.N; i++) {
+                let I_cpl = 0;
+                this.model.adj[i].forEach(j => { I_cpl += (this.v[j] - this.v[i]) * 0.15; });
+                const dv = (this.v[i] - this.v[i]**3/3 - this.w[i] + this.I0[i] + I_cpl) * 15;
+                const dw = (this.v[i] + 0.7 - 0.8 * this.w[i]) * 0.12;
+                v_new[i] += dt*dv; w_new[i] += dt*dw;
+            }
+            this.v = v_new; this.w = w_new;
+
+            const hr = this.I0[0] * 110;
+            this.hr_history.push(hr); if(this.hr_history.length > 100) this.hr_history.shift();
+            const avg_hr = this.hr_history.reduce((a,b)=>a+b,0) / this.hr_history.length;
+            const coherence = Math.max(0, 1 - (this.v.reduce((s,val,i,a) => s + Math.abs(val - a.reduce((x,y)=>x+y,0)/a.length), 0)/this.N)*2);
+            const sv = 70 * Math.max(0.5, coherence);
+            const co = avg_hr * sv / 1000;
+            this.co_history.push(co); if(this.co_history.length > 100) this.co_history.shift();
+            const avg_co = this.co_history.reduce((a,b)=>a+b,0) / this.co_history.length;
+            this.map = avg_co * SimConfig.svr / 80;
+            const dias = this.map * 0.75, sys = this.map * 1.25;
+            const hr_ms = 60000 / avg_hr;
+            const theta_SA_pwm = Math.round(Math.max(0, Math.min(255, (this.v[0] + 1.2)/2.4 * 255)));
+
+            return { ecg: this.v.reduce((s,v,i) => s + v * (i < this.N/2 ? 0.01 : -0.02), 0), hr: avg_hr, co: avg_co, sys, dias, coherence, hr_ms, theta_SA_pwm };
+        }
+    }
+
+    function initGraphics() {
+        if (!window.THREE) return false;
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(75, canvasContainer.clientWidth / canvasContainer.clientHeight, 0.1, 1000);
+        camera.position.z = 3.5;
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        canvasContainer.appendChild(renderer.domElement);
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        scene.add(new THREE.DirectionalLight(0xffffff, 0.5));
+        return true;
+    }
+
+    function initChart() {
+        const ctx = telemetryCanvas.getContext('2d');
+        telemetryChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [
+                { label: 'ECG', data: [], borderColor: '#f87171', borderWidth: 2, pointRadius: 0 },
+                { label: 'Coherence', data: [], borderColor: '#60a5fa', borderWidth: 2, pointRadius: 0, yAxisID: 'y2' },
+                { label: 'Simulated CO', data: [], borderColor: '#10b981', borderWidth: 2, pointRadius: 0, yAxisID: 'y_co' },
+            ]},
+            options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 }, interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: { type: 'linear', display: false },
+                    y: { position: 'left', min: -0.5, max: 0.5, grid: { drawOnChartArea: false }, title: { display: true, text: 'ECG (mV)', color: '#f87171'} },
+                    y2: { position: 'right', min: 0, max: 1, grid: { color: 'rgba(255,255,255,0.1)' }, title: { display: true, text: 'Coherence', color: '#60a5fa'} },
+                    y_co: { position: 'left', min: 0, max: 8, display: false }
+                },
+                plugins: { legend: { labels: { color: '#f3f4f6' } } }
+            }
+        });
+    }
+
+    function updateGraphics() {
+        if (!nodeMesh || !liveSim || !heartModel) return;
+        const color = new THREE.Color();
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < liveSim.N; i++) {
+            const activation = (liveSim.v[i] + 1.2) / 2.4;
+            const n = heartModel.meta.n;
+            let baseColor;
+            if (i >= heartModel.meta.offsets.LV) baseColor = ChamberColors.LV;
+            else if (i >= heartModel.meta.offsets.RV) baseColor = ChamberColors.RV;
+            else if (i >= heartModel.meta.offsets.LA) baseColor = ChamberColors.LA;
+            else baseColor = ChamberColors.RA;
+            if (isChamberView && baseColor) color.copy(baseColor).lerp(new THREE.Color(1,1,1), Math.max(0, (activation - 0.5) * 2));
+            else color.setHSL(0.66 - activation * 0.66, 1, 0.6);
+            nodeMesh.setColorAt(i, color);
+            dummy.position.fromArray(heartModel.V_all[i]);
+            const scale = 1.0 + liveSim.v[i] * 0.5;
+            dummy.scale.set(scale, scale, scale);
+            dummy.updateMatrix();
+            nodeMesh.setMatrixAt(i, dummy.matrix);
+        }
+        nodeMesh.instanceColor.needsUpdate = true;
+        nodeMesh.instanceMatrix.needsUpdate = true;
+        controls.update();
+        renderer.render(scene, camera);
+    }
+
+    function updateTelemetry(data) {
+        if(!data) return;
+        hrDisplay.textContent = `${data.hr.toFixed(0)} BPM`;
+        coDisplay.textContent = `${data.co.toFixed(2)} L/min`;
+        bpDisplay.textContent = `${data.sys.toFixed(0)}/${data.dias.toFixed(0)}`;
+        const chart = telemetryChart.data;
+        const time = performance.now()/1000;
+        const x_axis = time;
+        chart.datasets[0].data.push({x: x_axis, y: data.ecg});
+        chart.datasets[1].data.push({x: x_axis, y: data.coherence});
+        chart.datasets[2].data.push({x: x_axis, y: data.co});
+        while(chart.datasets[0].data.length > 200) { chart.datasets.forEach(ds => { if(ds.data.length > 0) ds.data.shift(); }); }
+        if (chart.datasets[0].data.length > 0) {
+            telemetryChart.options.scales.x.max = time;
+            telemetryChart.options.scales.x.min = chart.datasets[0].data[0].x;
+        }
+        telemetryChart.update('none');
+        exportBuffer.push(data);
+        if(exportBuffer.length > 500) exportBuffer.shift();
+
+        // BiVACOR validation
+        if (isValidateMode) {
+            const currentHR = data.hr;
+            const currentCO = data.co;
+
+            // Find nearest benchmark HR
+            let nearestIdx = 0;
+            let minDiff = Math.abs(BIVACOR_BENCHMARK.hr[0] - currentHR);
+            for (let i = 1; i < BIVACOR_BENCHMARK.hr.length; i++) {
+                const diff = Math.abs(BIVACOR_BENCHMARK.hr[i] - currentHR);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    nearestIdx = i;
+                }
+            }
+
+            const benchmarkCO = BIVACOR_BENCHMARK.co[nearestIdx];
+            const error = Math.abs(currentCO - benchmarkCO);
+            const errorPct = (error / benchmarkCO * 100).toFixed(1);
+
+            dom.validationDisplay.textContent = `BiVACOR Δ: ${errorPct}% (Ref: ${benchmarkCO.toFixed(1)} L/min)`;
+            dom.validationDisplay.classList.remove('hidden');
+
+            // Color code based on error
+            if (errorPct < 10) {
+                dom.validationDisplay.className = 'validation-text text-green-400';
+            } else if (errorPct < 20) {
+                dom.validationDisplay.className = 'validation-text text-yellow-400';
+            } else {
+                dom.validationDisplay.className = 'validation-text text-red-400';
+            }
+        } else {
+            dom.validationDisplay.classList.add('hidden');
+        }
+
+        // Phantom flow field computation
+        if (isPhantomMode && liveSim) {
+            const chamberFlow = {
+                RA: 0, LA: 0, RV: 0, LV: 0
+            };
+            const n = heartModel.meta.n;
+
+            // Calculate average activation per chamber
+            for (let i = 0; i < liveSim.N; i++) {
+                const activation = (liveSim.v[i] + 1.2) / 2.4;
+                if (i >= heartModel.meta.offsets.LV) chamberFlow.LV += activation;
+                else if (i >= heartModel.meta.offsets.RV) chamberFlow.RV += activation;
+                else if (i >= heartModel.meta.offsets.LA) chamberFlow.LA += activation;
+                else chamberFlow.RA += activation;
+            }
+
+            // Normalize by node count
+            chamberFlow.RA /= n;
+            chamberFlow.LA /= n;
+            chamberFlow.RV /= n;
+            chamberFlow.LV /= n;
+
+            phantomFlowField = {
+                timestamp: Date.now(),
+                hr: data.hr,
+                chambers: chamberFlow,
+                pressure: {
+                    systolic: data.sys,
+                    diastolic: data.dias
+                }
+            };
+        }
+    }
+
+    // Main animation loop
+    function mainLoop(timestamp) {
+        if (!isPaused && liveSim) {
+            const simData = liveSim.step(timestamp / 1000, dom.baroreflexToggle.checked);
+            updateTelemetry(simData);
+            updateGraphics();
+        } else if (isPaused) {
+            // Still render when paused
+            updateGraphics();
+        }
+
+        animationFrameId = requestAnimationFrame(mainLoop);
+    }
+
+    function setup() {
+        if (!window.THREE) {
+            canvasContainer.innerHTML = `<div class="text-red-400 p-4">Error: THREE.js failed to load.</div>`;
+            return;
+        }
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+        SimConfig.base_I0_SA = 0.55 + ((parseFloat(hrSlider.value) - 40) / 80) * 0.25;
+        SimConfig.svr = parseFloat(svrSlider.value);
+        heartModel = new HeartModel();
+        liveSim = new LiveSim(heartModel);
+        exportBuffer = [];
+        phantomFlowField = null;
+        if(scene) while(scene.children.length > 0) scene.remove(scene.children[0]);
+
+        const nodeGeo = new THREE.SphereGeometry(0.08, 16, 12);
+        const nodeMat = new THREE.MeshPhongMaterial();
+        nodeMesh = new THREE.InstancedMesh(nodeGeo, nodeMat, liveSim.N);
+
+        const dummy = new THREE.Object3D();
+        for(let i=0; i<liveSim.N; i++) {
+            dummy.position.fromArray(heartModel.V_all[i]);
+            dummy.updateMatrix();
+            nodeMesh.setMatrixAt(i, dummy.matrix);
+        }
+        scene.add(nodeMesh);
+
+        if(telemetryChart) telemetryChart.destroy();
+        initChart();
+        lastTimestamp = 0; isPaused = false;
+        playPauseButton.textContent = "Pause";
+        animationFrameId = requestAnimationFrame(mainLoop);
+    }
+
+    function handleControlChange() {
+        hrValue.textContent = `${hrSlider.value} BPM`;
+        svrValue.textContent = `${svrSlider.value}`;
+    }
+
+    // Event listeners
+    [hrSlider, svrSlider, baroreflexToggle].forEach(s => {
+        if(s) {
+            s.addEventListener('input', handleControlChange);
+            s.addEventListener('change', setup);
+        }
+    });
+
+    resetButton.addEventListener('click', setup);
+    playPauseButton.addEventListener('click', () => {
+        isPaused = !isPaused;
+        playPauseButton.textContent = isPaused ? 'Play' : 'Pause';
+    });
+
+    chamberViewToggle.addEventListener('change', () => {
+        isChamberView = chamberViewToggle.checked;
+    });
+
+    validateToggle.addEventListener('change', () => {
+        isValidateMode = validateToggle.checked;
+        if (!isValidateMode) {
+            dom.validationDisplay.classList.add('hidden');
+        }
+    });
+
+    phantomModeToggle.addEventListener('change', () => {
+        isPhantomMode = phantomModeToggle.checked;
+        if (isPhantomMode) {
+            console.log('Phantom Flow Mode: ENABLED - Flow field computation active');
+        } else {
+            phantomFlowField = null;
+            console.log('Phantom Flow Mode: DISABLED');
+        }
+    });
+
+    exportButton.addEventListener('click', () => {
+        if (exportBuffer.length === 0) {
+            alert('No data to export. Run the simulation first.');
+            return;
+        }
+
+        // Create CSV format for actuator control
+        let csv = 'timestamp,hr_bpm,co_lpm,sys_mmhg,dias_mmhg,coherence,hr_ms,pwm_sa\n';
+        const currentTime = Date.now();
+
+        exportBuffer.forEach((data, idx) => {
+            csv += `${currentTime + idx * 5},${data.hr.toFixed(2)},${data.co.toFixed(3)},${data.sys.toFixed(1)},${data.dias.toFixed(1)},${data.coherence.toFixed(3)},${data.hr_ms.toFixed(1)},${data.theta_SA_pwm}\n`;
+        });
+
+        // Add phantom flow field if available
+        if (isPhantomMode && phantomFlowField) {
+            csv += '\n# Phantom Flow Field Data\n';
+            csv += `# Timestamp: ${phantomFlowField.timestamp}\n`;
+            csv += `# RA: ${phantomFlowField.chambers.RA.toFixed(4)}\n`;
+            csv += `# LA: ${phantomFlowField.chambers.LA.toFixed(4)}\n`;
+            csv += `# RV: ${phantomFlowField.chambers.RV.toFixed(4)}\n`;
+            csv += `# LV: ${phantomFlowField.chambers.LV.toFixed(4)}\n`;
+        }
+
+        // Download the file
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `heart_actuator_data_${Date.now()}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        console.log(`Exported ${exportBuffer.length} data points for actuator control`);
+    });
+
+    // Initialize
+    if (initGraphics()) {
+        handleControlChange();
+        setup();
+        new ResizeObserver(() => {
+            if(!renderer || !camera) return;
+            const w = canvasContainer.clientWidth, h = canvasContainer.clientHeight;
+            renderer.setSize(w, h, false);
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+        }).observe(canvasContainer);
+    }
+}
+</script>
+</body>
+</html>
