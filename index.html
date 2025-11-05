@@ -409,7 +409,7 @@ window.onload = function() {
         if(scene) while(scene.children.length > 0) scene.remove(scene.children[0]);
 
         const nodeGeo = new THREE.SphereGeometry(0.08, 16, 12);
-        const nodeMat = new THREE.MeshPhongMaterial();
+        const nodeMat = new THREE.MeshPhongMaterial({ vertexColors: true });
         nodeMesh = new THREE.InstancedMesh(nodeGeo, nodeMat, liveSim.N);
 
         const dummy = new THREE.Object3D();
