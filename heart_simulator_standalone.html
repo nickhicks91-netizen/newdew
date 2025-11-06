@@ -111,6 +111,10 @@
                     <label class="switch"><input type="checkbox" id="bloodFlowToggle"><span class="slider"></span></label>
                 </div>
                 <div class="flex justify-between items-center mt-2">
+                    <span class="font-medium text-gray-300">CFD Hemodynamics</span>
+                    <label class="switch"><input type="checkbox" id="cfdToggle"><span class="slider"></span></label>
+                </div>
+                <div class="flex justify-between items-center mt-2">
                     <span class="font-medium text-gray-300">Heart Valves Viz</span>
                     <label class="switch"><input type="checkbox" id="valvesToggle"><span class="slider"></span></label>
                 </div>
@@ -204,6 +208,8 @@ window.onload = function() {
     let isColorCoded = true, isFlowViz = false, flowArrows = [];
     let isParticleTrails = false, particles = [], particleMaterial, particleGeometry, particlePoints;
     let isBloodFlow = false;
+    let isCfd = false, cfdPlane, cfdVelocityTexture, cfdPressureTexture, cfdRendererTargetA, cfdRendererTargetB;
+    let cfdAdvectionMaterial, cfdDiffusionMaterial, cfdProjectionMaterial, cfdDisplayMaterial;
     let isValvesViz = false, valveMeshes = [];
     let animationFrameId, lastUpdateTime = 0;
     let isPaused = false, isPhantomMode = false, isValidateMode = false, isBaroreflexOn = true;
@@ -230,6 +236,7 @@ window.onload = function() {
         flowVizToggle: document.getElementById('flowVizToggle'),
         particleTrailsToggle: document.getElementById('particleTrailsToggle'),
         bloodFlowToggle: document.getElementById('bloodFlowToggle'),
+        cfdToggle: document.getElementById('cfdToggle'),
         valvesToggle: document.getElementById('valvesToggle'),
         playPauseButton: document.getElementById('playPauseButton'),
         resetButton: document.getElementById('resetButton'),
@@ -485,6 +492,146 @@ window.onload = function() {
             valve.rotation.set(Math.PI / 2, 0, 0);
             scene.add(valve);
             valveMeshes.push(valve);
+        });
+
+        // Setup CFD hemodynamics system
+        cfdPlane = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.5, 1.5),
+            new THREE.MeshBasicMaterial({ map: null })
+        );
+        cfdPlane.position.set(0, 0, 0);
+        cfdPlane.rotation.set(Math.PI / 2, 0, 0);
+        cfdPlane.visible = false;
+        scene.add(cfdPlane);
+
+        // Setup render targets for ping-pong simulation
+        cfdRendererTargetA = new THREE.WebGLRenderTarget(128, 128, {
+            format: THREE.RGBAFormat,
+            type: THREE.FloatType
+        });
+        cfdRendererTargetB = cfdRendererTargetA.clone();
+
+        // Initialize velocity texture
+        const initData = new Float32Array(128 * 128 * 4);
+        for (let i = 0; i < initData.length; i += 4) {
+            initData[i] = 0;     // u velocity
+            initData[i + 1] = 0; // v velocity
+            initData[i + 2] = 0; // pressure
+            initData[i + 3] = 1; // alpha
+        }
+        cfdVelocityTexture = new THREE.DataTexture(initData, 128, 128, THREE.RGBAFormat, THREE.FloatType);
+        cfdVelocityTexture.needsUpdate = true;
+        cfdPressureTexture = cfdRendererTargetA.texture.clone();
+
+        // Shared vertex shader for CFD
+        const cfdVertexShader = `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        // Advection shader
+        cfdAdvectionMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                velocity: { value: cfdVelocityTexture },
+                dt: { value: SimConfig.dt },
+                force: { value: null }
+            },
+            vertexShader: cfdVertexShader,
+            fragmentShader: `
+                uniform sampler2D velocity;
+                uniform float dt;
+                uniform sampler2D force;
+                varying vec2 vUv;
+                void main() {
+                    vec4 vel = texture2D(velocity, vUv);
+                    vec2 p = vUv - vel.xy * dt;
+                    vec4 adv = texture2D(velocity, p);
+                    vec2 f = texture2D(force, vUv).rg * 0.1;
+                    gl_FragColor = vec4(adv.xy + f, adv.z, adv.w);
+                }
+            `
+        });
+
+        // Diffusion shader
+        cfdDiffusionMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                velocity: { value: null },
+                nu: { value: 0.01 },
+                dt: { value: SimConfig.dt }
+            },
+            vertexShader: cfdVertexShader,
+            fragmentShader: `
+                uniform sampler2D velocity;
+                uniform float nu;
+                uniform float dt;
+                varying vec2 vUv;
+                vec2 laplacian(sampler2D tex, vec2 uv, float dx) {
+                    vec2 lap = texture2D(tex, uv + vec2(dx, 0)).xy +
+                               texture2D(tex, uv - vec2(dx, 0)).xy +
+                               texture2D(tex, uv + vec2(0, dx)).xy +
+                               texture2D(tex, uv - vec2(0, dx)).xy -
+                               4.0 * texture2D(tex, uv).xy;
+                    return lap / (dx * dx);
+                }
+                void main() {
+                    vec4 vel = texture2D(velocity, vUv);
+                    vec2 diff = nu * laplacian(velocity, vUv, 1.0/128.0);
+                    gl_FragColor = vec4(vel.xy + diff * dt, vel.z, vel.w);
+                }
+            `
+        });
+
+        // Projection shader
+        cfdProjectionMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                velocity: { value: null },
+                dx: { value: 1.0 / 128 }
+            },
+            vertexShader: cfdVertexShader,
+            fragmentShader: `
+                uniform sampler2D velocity;
+                uniform float dx;
+                varying vec2 vUv;
+                void main() {
+                    vec4 vel = texture2D(velocity, vUv);
+                    float div = (texture2D(velocity, vUv + vec2(dx, 0)).x -
+                                 texture2D(velocity, vUv - vec2(dx, 0)).x +
+                                 texture2D(velocity, vUv + vec2(0, dx)).y -
+                                 texture2D(velocity, vUv - vec2(0, dx)).y) / (2.0 * dx);
+                    float p = (texture2D(velocity, vUv + vec2(dx, 0)).z +
+                               texture2D(velocity, vUv - vec2(dx, 0)).z +
+                               texture2D(velocity, vUv + vec2(0, dx)).z +
+                               texture2D(velocity, vUv - vec2(0, dx)).z -
+                               div * (dx * dx)) / 4.0;
+                    vec2 gradP = vec2(
+                        texture2D(velocity, vUv + vec2(dx, 0)).z -
+                        texture2D(velocity, vUv - vec2(dx, 0)).z,
+                        texture2D(velocity, vUv + vec2(0, dx)).z -
+                        texture2D(velocity, vUv - vec2(0, dx)).z
+                    ) / (2.0 * dx);
+                    gl_FragColor = vec4(vel.xy - gradP, p, vel.w);
+                }
+            `
+        });
+
+        // Display shader
+        cfdDisplayMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                velocity: { value: null }
+            },
+            vertexShader: cfdVertexShader,
+            fragmentShader: `
+                uniform sampler2D velocity;
+                varying vec2 vUv;
+                void main() {
+                    vec4 vel = texture2D(velocity, vUv);
+                    float speed = length(vel.xy);
+                    gl_FragColor = vec4(speed, 0.0, 1.0 - speed, 1.0);
+                }
+            `
         });
 
         console.log('Graphics initialized, scene has', scene.children.length, 'children');
@@ -762,6 +909,71 @@ window.onload = function() {
             }
 
             const dias = map * 0.75, sys = map * 1.25;
+
+            // CFD hemodynamics simulation
+            if (isCfd && cfdPlane) {
+                // Create force texture from electrical field gradients
+                const forceData = new Float32Array(128 * 128 * 4);
+                for (let i = 1; i < 127; i++) {
+                    for (let j = 1; j < 127; j++) {
+                        const srcI = Math.floor(i / 128 * model.size);
+                        const srcJ = Math.floor(j / 128 * model.size);
+                        const srcI_next = Math.min(srcI + 1, model.size - 1);
+                        const srcI_prev = Math.max(srcI - 1, 0);
+                        const srcJ_next = Math.min(srcJ + 1, model.size - 1);
+                        const srcJ_prev = Math.max(srcJ - 1, 0);
+                        const gradX = (model.u[model.idx(srcI_next, srcJ)] - model.u[model.idx(srcI_prev, srcJ)]) / (2 * model.dx);
+                        const gradY = (model.u[model.idx(srcI, srcJ_next)] - model.u[model.idx(srcI, srcJ_prev)]) / (2 * model.dx);
+                        const idx = (i * 128 + j) * 4;
+                        forceData[idx] = gradX;
+                        forceData[idx + 1] = gradY;
+                        forceData[idx + 2] = 0;
+                        forceData[idx + 3] = 1;
+                    }
+                }
+                const forceTexture = new THREE.DataTexture(forceData, 128, 128, THREE.RGBAFormat, THREE.FloatType);
+                forceTexture.needsUpdate = true;
+
+                // Store original render target
+                const originalTarget = renderer.getRenderTarget();
+
+                // CFD solver steps: Advection -> Diffusion -> Projection
+                // Advection step
+                cfdAdvectionMaterial.uniforms.velocity.value = cfdRendererTargetA.texture;
+                cfdAdvectionMaterial.uniforms.force.value = forceTexture;
+                renderer.setRenderTarget(cfdRendererTargetB);
+                const tempMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), cfdAdvectionMaterial);
+                const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+                const tempScene = new THREE.Scene();
+                tempScene.add(tempMesh);
+                renderer.render(tempScene, orthoCamera);
+                [cfdRendererTargetA, cfdRendererTargetB] = [cfdRendererTargetB, cfdRendererTargetA];
+
+                // Diffusion step
+                cfdDiffusionMaterial.uniforms.velocity.value = cfdRendererTargetA.texture;
+                tempMesh.material = cfdDiffusionMaterial;
+                renderer.setRenderTarget(cfdRendererTargetB);
+                renderer.render(tempScene, orthoCamera);
+                [cfdRendererTargetA, cfdRendererTargetB] = [cfdRendererTargetB, cfdRendererTargetA];
+
+                // Projection step
+                cfdProjectionMaterial.uniforms.velocity.value = cfdRendererTargetA.texture;
+                tempMesh.material = cfdProjectionMaterial;
+                renderer.setRenderTarget(cfdRendererTargetB);
+                renderer.render(tempScene, orthoCamera);
+                [cfdRendererTargetA, cfdRendererTargetB] = [cfdRendererTargetB, cfdRendererTargetA];
+
+                // Update display material and show plane
+                cfdDisplayMaterial.uniforms.velocity.value = cfdRendererTargetA.texture;
+                cfdPlane.material = cfdDisplayMaterial;
+                cfdPlane.visible = true;
+
+                // Restore original render target
+                renderer.setRenderTarget(originalTarget);
+            } else if (cfdPlane) {
+                cfdPlane.visible = false;
+            }
+
             updateTelemetry({ ecg, avgU, hr: baseHR, co, sys, dias, gci, plv, energy, winding, ejectionFraction, spiralDetection, shearProxy, hemolysisIndex });
             updateGraphics();
         }
@@ -907,6 +1119,7 @@ window.onload = function() {
         isBloodFlow = dom.bloodFlowToggle.checked;
         particlePoints.visible = isBloodFlow || isParticleTrails;
     });
+    dom.cfdToggle.addEventListener('change', () => isCfd = dom.cfdToggle.checked);
     dom.valvesToggle.addEventListener('change', () => isValvesViz = dom.valvesToggle.checked);
     dom.playPauseButton.addEventListener('click', () => {
         isPaused = !isPaused;
