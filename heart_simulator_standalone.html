@@ -106,6 +106,10 @@
                     <span class="font-medium text-gray-300">Particle Trails</span>
                     <label class="switch"><input type="checkbox" id="particleTrailsToggle"><span class="slider"></span></label>
                 </div>
+                <div class="flex justify-between items-center mt-2">
+                    <span class="font-medium text-gray-300">Heart Valves Viz</span>
+                    <label class="switch"><input type="checkbox" id="valvesToggle"><span class="slider"></span></label>
+                </div>
             </div>
             <div class="flex items-center gap-4">
                 <button id="playPauseButton" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Pause</button>
@@ -167,6 +171,10 @@
             <span class="font-bold text-lg text-orange-400">Hemolysis Index</span>
             <span id="hemolysisDisplay" class="font-mono text-xl font-bold text-white">-- g/100L</span>
         </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-lg text-red-400">Regurg Proxy</span>
+            <span id="regurgDisplay" class="font-mono text-xl font-bold text-white">-- %</span>
+        </div>
         <div class="telemetry-card flex-grow">
             <canvas id="telemetryCanvas"></canvas>
         </div>
@@ -191,6 +199,7 @@ window.onload = function() {
     let crossSectionPlane, crossSectionTexture, crossSectionCanvas, crossSectionCtx, isCrossSection = false;
     let isColorCoded = true, isFlowViz = false, flowArrows = [];
     let isParticleTrails = false, particles = [], particleMaterial, particleGeometry, particlePoints;
+    let isValvesViz = false, valveMeshes = [];
     let animationFrameId, lastUpdateTime = 0;
     let isPaused = false, isPhantomMode = false, isValidateMode = false, isBaroreflexOn = true;
     let exportBuffer = [];
@@ -215,6 +224,7 @@ window.onload = function() {
         colorToggle: document.getElementById('colorToggle'),
         flowVizToggle: document.getElementById('flowVizToggle'),
         particleTrailsToggle: document.getElementById('particleTrailsToggle'),
+        valvesToggle: document.getElementById('valvesToggle'),
         playPauseButton: document.getElementById('playPauseButton'),
         resetButton: document.getElementById('resetButton'),
         hrValue: document.getElementById('hrValue'),
@@ -234,6 +244,7 @@ window.onload = function() {
         spiralDisplay: document.getElementById('spiralDisplay'),
         shearDisplay: document.getElementById('shearDisplay'),
         hemolysisDisplay: document.getElementById('hemolysisDisplay'),
+        regurgDisplay: document.getElementById('regurgDisplay'),
         telemetryCanvas: document.getElementById('telemetryCanvas')
     };
 
@@ -457,6 +468,19 @@ window.onload = function() {
         scene.add(particlePoints);
         particlePoints.visible = false;
 
+        // Add 4 valves: mitral (LA-LV), tricuspid (RA-RV), aortic (LV-aorta proxy), pulmonary (RV-pulmonary proxy)
+        const valveGeo = new THREE.PlaneGeometry(0.3, 0.3);
+        const valveMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+        ['mitral', 'tricuspid', 'aortic', 'pulmonary'].forEach((type, i) => {
+            const valve = new THREE.Mesh(valveGeo, valveMat);
+            valve.visible = false;
+            // Position proxies: mitral at bottom-left quadrant center, etc.
+            valve.position.set(i % 2 === 0 ? -0.5 : 0.5, i < 2 ? -0.5 : 0.5, 0);
+            valve.rotation.set(Math.PI / 2, 0, 0);
+            scene.add(valve);
+            valveMeshes.push(valve);
+        });
+
         console.log('Graphics initialized, scene has', scene.children.length, 'children');
     }
 
@@ -594,6 +618,18 @@ window.onload = function() {
             particlePoints.visible = false;
         }
 
+        // Heart valves visualization
+        if (isValvesViz) {
+            valveMeshes.forEach((valve, i) => {
+                const phase = sync.getPhase(i);
+                const openFactor = Math.abs(Math.sin(phase)); // Open during systole/diastole proxy
+                valve.scale.set(1, openFactor, 1); // Scale to simulate opening/closing
+                valve.visible = true;
+            });
+        } else {
+            valveMeshes.forEach(valve => valve.visible = false);
+        }
+
         controls.update();
         renderer.render(scene, camera);
     }
@@ -610,6 +646,8 @@ window.onload = function() {
         dom.spiralDisplay.textContent = `${data.spiralDetection.toFixed(3)}`;
         dom.shearDisplay.textContent = `${data.shearProxy.toFixed(2)} Pa`;
         dom.hemolysisDisplay.textContent = `${data.hemolysisIndex.toFixed(4)} g/100L`;
+        const regurgitationProxy = (1 - data.gci) * 10; // % backflow proxy based on desync
+        dom.regurgDisplay.textContent = `${regurgitationProxy.toFixed(1)} %`;
         const chart = telemetryChart.data;
         const time = performance.now()/1000;
         chart.labels.push(time);
@@ -822,8 +860,11 @@ window.onload = function() {
     });
     dom.exportButton.addEventListener('click', () => {
         if (exportBuffer.length === 0) return alert('No data to export.');
-        let csv = 'Time,HR,CO,Sys,Dias,GCI,PLV,Energy,Winding,EF,Spiral,ECG,AvgU,Shear,Hemolysis\n';
-        exportBuffer.forEach((d, i) => csv += `${i},${d.hr},${d.co},${d.sys},${d.dias},${d.gci},${d.plv},${d.energy},${d.winding},${d.ejectionFraction},${d.spiralDetection},${d.ecg},${d.avgU},${d.shearProxy},${d.hemolysisIndex}\n`);
+        let csv = 'Time,HR,CO,Sys,Dias,GCI,PLV,Energy,Winding,EF,Spiral,ECG,AvgU,Shear,Hemolysis,Regurgitation\n';
+        exportBuffer.forEach((d, i) => {
+            const regurg = (1 - d.gci) * 10;
+            csv += `${i},${d.hr},${d.co},${d.sys},${d.dias},${d.gci},${d.plv},${d.energy},${d.winding},${d.ejectionFraction},${d.spiralDetection},${d.ecg},${d.avgU},${d.shearProxy},${d.hemolysisIndex},${regurg.toFixed(1)}\n`;
+        });
         if (isPhantomMode && phantomFlowField) {
             csv += '\nPhantom Flow Field\nTimestamp,HR,RA,LA,RV,LV,Sys,Dias\n';
             csv += `${phantomFlowField.timestamp},${phantomFlowField.hr},${phantomFlowField.chambers.RA},${phantomFlowField.chambers.LA},${phantomFlowField.chambers.RV},${phantomFlowField.chambers.LV},${phantomFlowField.pressure.systolic},${phantomFlowField.pressure.diastolic}\n`;
@@ -838,6 +879,7 @@ window.onload = function() {
     dom.colorToggle.addEventListener('change', () => isColorCoded = dom.colorToggle.checked);
     dom.flowVizToggle.addEventListener('change', () => isFlowViz = dom.flowVizToggle.checked);
     dom.particleTrailsToggle.addEventListener('change', () => isParticleTrails = dom.particleTrailsToggle.checked);
+    dom.valvesToggle.addEventListener('change', () => isValvesViz = dom.valvesToggle.checked);
     dom.playPauseButton.addEventListener('click', () => {
         isPaused = !isPaused;
         dom.playPauseButton.textContent = isPaused ? 'Play' : 'Pause';
