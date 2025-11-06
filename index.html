@@ -130,6 +130,14 @@
                     <span class="font-medium text-gray-300">3D Volume Render</span>
                     <label class="switch"><input type="checkbox" id="volumeRenderToggle"><span class="slider"></span></label>
                 </div>
+                <div class="mt-2">
+                    <label for="vtfThresholdSlider" class="flex justify-between font-medium text-gray-300"><span>VTF Threshold</span><span id="vtfThresholdValue" class="font-bold text-blue-400">0.5</span></label>
+                    <input id="vtfThresholdSlider" type="range" min="0" max="1" value="0.5" step="0.05" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
+                <div class="mt-2">
+                    <label for="vtfOpacitySlider" class="flex justify-between font-medium text-gray-300"><span>VTF Opacity</span><span id="vtfOpacityValue" class="font-bold text-blue-400">0.8</span></label>
+                    <input id="vtfOpacitySlider" type="range" min="0" max="1" value="0.8" step="0.05" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
             </div>
             <div class="flex items-center gap-4">
                 <button id="playPauseButton" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Pause</button>
@@ -230,6 +238,7 @@ window.onload = function() {
     let cfdAdvectionMaterial, cfdDiffusionMaterial, cfdProjectionMaterial, cfdDisplayMaterial;
     let isValvesViz = false, isValveInteract = false, valveMeshes = [];
     let isVolumeRender = false, volumeMesh, volumeTexture, volumeMaterial;
+    let vtfThreshold = 0.5, vtfOpacity = 0.8;
     let animationFrameId, lastUpdateTime = 0;
     let isPaused = false, isPhantomMode = false, isValidateMode = false, isBaroreflexOn = true;
     let exportBuffer = [];
@@ -260,6 +269,10 @@ window.onload = function() {
         valvesToggle: document.getElementById('valvesToggle'),
         valveInteractToggle: document.getElementById('valveInteractToggle'),
         volumeRenderToggle: document.getElementById('volumeRenderToggle'),
+        vtfThresholdSlider: document.getElementById('vtfThresholdSlider'),
+        vtfOpacitySlider: document.getElementById('vtfOpacitySlider'),
+        vtfThresholdValue: document.getElementById('vtfThresholdValue'),
+        vtfOpacityValue: document.getElementById('vtfOpacityValue'),
         playPauseButton: document.getElementById('playPauseButton'),
         resetButton: document.getElementById('resetButton'),
         hrValue: document.getElementById('hrValue'),
@@ -707,75 +720,65 @@ window.onload = function() {
         volumeTexture.unpackAlignment = 1;
         volumeTexture.needsUpdate = true;
 
-        // Raymarching shader material
+        // Raymarching shader material with VTF
         volumeMaterial = new THREE.ShaderMaterial({
             uniforms: {
-                volumeData: { value: volumeTexture },
-                threshold: { value: 0.5 },
+                volumeTexture: { value: volumeTexture },
+                threshold: { value: vtfThreshold },
+                opacityMax: { value: vtfOpacity },
                 time: { value: 0.0 }
             },
             vertexShader: `
                 varying vec3 vPosition;
                 varying vec3 vWorldPos;
                 void main() {
-                    vPosition = position + vec3(0.5); // Normalize to [0,1]
+                    vPosition = position;
                     vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
                     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
                 }
             `,
             fragmentShader: `
-                uniform sampler3D volumeData;
+                uniform sampler3D volumeTexture;
                 uniform float threshold;
+                uniform float opacityMax;
                 uniform float time;
                 varying vec3 vPosition;
                 varying vec3 vWorldPos;
 
-                void main() {
-                    vec3 rayDir = normalize(vWorldPos - cameraPosition);
-                    vec3 rayOrigin = vPosition;
-
-                    // Raymarching parameters
-                    const int steps = 64;
-                    const float stepSize = 1.732 / float(steps); // sqrt(3) for cube diagonal
-
-                    vec4 accum = vec4(0.0);
-                    vec3 pos = rayOrigin;
-
-                    for (int i = 0; i < steps; i++) {
-                        if (pos.x < 0.0 || pos.x > 1.0 || pos.y < 0.0 || pos.y > 1.0 || pos.z < 0.0 || pos.z > 1.0) break;
-
-                        float sample = texture(volumeData, pos).r;
-
-                        // Animated threshold for wave visualization
-                        float animThreshold = threshold + 0.1 * sin(time + pos.x * 6.28);
-
-                        if (sample > animThreshold) {
-                            // Calculate gradient for normal (lighting)
-                            vec3 gradientStep = vec3(1.0 / 50.0);
-                            float gx = texture(volumeData, pos + vec3(gradientStep.x, 0, 0)).r - texture(volumeData, pos - vec3(gradientStep.x, 0, 0)).r;
-                            float gy = texture(volumeData, pos + vec3(0, gradientStep.y, 0)).r - texture(volumeData, pos - vec3(0, gradientStep.y, 0)).r;
-                            float gz = texture(volumeData, pos + vec3(0, 0, gradientStep.z)).r - texture(volumeData, pos - vec3(0, 0, gradientStep.z)).r;
-                            vec3 normal = normalize(vec3(gx, gy, gz));
-
-                            // Simple lighting
-                            vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
-                            float diffuse = max(dot(normal, lightDir), 0.0);
-
-                            // Orange shading with lighting
-                            vec3 color = vec3(1.0, 0.5, 0.0) * (0.3 + 0.7 * diffuse);
-                            float alpha = sample * 0.5;
-
-                            // Front-to-back blending
-                            accum.rgb += (1.0 - accum.a) * color * alpha;
-                            accum.a += (1.0 - accum.a) * alpha;
-
-                            if (accum.a > 0.95) break;
-                        }
-
-                        pos += rayDir * stepSize;
+                float raymarch(vec3 ro, vec3 rd) {
+                    float t = 0.0, maxD = 0.0;
+                    for (int i = 0; i < 100; i++) {
+                        vec3 p = ro + rd * t;
+                        if (p.x < -0.5 || p.x > 0.5 || p.y < -0.5 || p.y > 0.5 || p.z < -0.5 || p.z > 0.5) break;
+                        float density = texture(volumeTexture, p * 0.5 + 0.5).r;
+                        float opacity = smoothstep(threshold - 0.1, threshold + 0.1, density) * opacityMax; // Simple transfer function
+                        maxD += opacity * 0.01; // Accumulate opacity
+                        if (maxD > 0.95) return t; // Early termination
+                        t += 0.01;
                     }
+                    return -1.0;
+                }
 
-                    gl_FragColor = vec4(accum.rgb, accum.a);
+                void main() {
+                    vec3 ro = cameraPosition;
+                    vec3 rd = normalize(vWorldPos - cameraPosition);
+                    float hit = raymarch(ro, rd);
+                    if (hit > 0.0) {
+                        vec3 p = ro + rd * hit;
+                        vec3 texCoord = p * 0.5 + 0.5;
+                        vec3 n = normalize(vec3(
+                            texture(volumeTexture, texCoord + vec3(0.01, 0, 0)).r - texture(volumeTexture, texCoord - vec3(0.01, 0, 0)).r,
+                            texture(volumeTexture, texCoord + vec3(0, 0.01, 0)).r - texture(volumeTexture, texCoord - vec3(0, 0.01, 0)).r,
+                            texture(volumeTexture, texCoord + vec3(0, 0, 0.01)).r - texture(volumeTexture, texCoord - vec3(0, 0, 0.01)).r
+                        ));
+                        vec3 light = normalize(vec3(1, 1, 1));
+                        float diff = max(dot(n, light), 0.0);
+                        float density = texture(volumeTexture, texCoord).r;
+                        vec3 col = mix(vec3(0.0, 0.5, 1.0), vec3(1.0, 0.0, 0.0), density); // VTF color ramp: blue low, red high
+                        gl_FragColor = vec4(col * (0.3 + 0.7 * diff), opacityMax);
+                    } else {
+                        discard;
+                    }
                 }
             `,
             transparent: true,
@@ -1407,6 +1410,16 @@ window.onload = function() {
     dom.valvesToggle.addEventListener('change', () => isValvesViz = dom.valvesToggle.checked);
     dom.valveInteractToggle.addEventListener('change', () => isValveInteract = dom.valveInteractToggle.checked);
     dom.volumeRenderToggle.addEventListener('change', () => isVolumeRender = dom.volumeRenderToggle.checked);
+    dom.vtfThresholdSlider.addEventListener('input', () => {
+        vtfThreshold = parseFloat(dom.vtfThresholdSlider.value);
+        dom.vtfThresholdValue.textContent = vtfThreshold.toFixed(2);
+        if (volumeMaterial) volumeMaterial.uniforms.threshold.value = vtfThreshold;
+    });
+    dom.vtfOpacitySlider.addEventListener('input', () => {
+        vtfOpacity = parseFloat(dom.vtfOpacitySlider.value);
+        dom.vtfOpacityValue.textContent = vtfOpacity.toFixed(2);
+        if (volumeMaterial) volumeMaterial.uniforms.opacityMax.value = vtfOpacity;
+    });
     dom.playPauseButton.addEventListener('click', () => {
         isPaused = !isPaused;
         dom.playPauseButton.textContent = isPaused ? 'Play' : 'Pause';
