@@ -98,6 +98,14 @@
                     <span class="font-medium text-gray-300">Chamber Colors</span>
                     <label class="switch"><input type="checkbox" id="colorToggle" checked><span class="slider"></span></label>
                 </div>
+                <div class="flex justify-between items-center mt-2">
+                    <span class="font-medium text-gray-300">Flow Velocity Viz</span>
+                    <label class="switch"><input type="checkbox" id="flowVizToggle"><span class="slider"></span></label>
+                </div>
+                <div class="flex justify-between items-center mt-2">
+                    <span class="font-medium text-gray-300">Particle Trails</span>
+                    <label class="switch"><input type="checkbox" id="particleTrailsToggle"><span class="slider"></span></label>
+                </div>
             </div>
             <div class="flex items-center gap-4">
                 <button id="playPauseButton" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Pause</button>
@@ -179,9 +187,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 window.onload = function() {
     const canvasContainer = document.getElementById('canvasContainer');
-    let scene, camera, renderer, controls, nodeMesh, telemetryChart, phantomFlowField;
+    let scene, camera, renderer, controls, nodeMesh, wireframe, telemetryChart, phantomFlowField;
     let crossSectionPlane, crossSectionTexture, crossSectionCanvas, crossSectionCtx, isCrossSection = false;
-    let isColorCoded = true;
+    let isColorCoded = true, isFlowViz = false, flowArrows = [];
+    let isParticleTrails = false, particles = [], particleMaterial, particleGeometry, particlePoints;
     let animationFrameId, lastUpdateTime = 0;
     let isPaused = false, isPhantomMode = false, isValidateMode = false, isBaroreflexOn = true;
     let exportBuffer = [];
@@ -204,6 +213,8 @@ window.onload = function() {
         exportButton: document.getElementById('exportButton'),
         crossSectionToggle: document.getElementById('crossSectionToggle'),
         colorToggle: document.getElementById('colorToggle'),
+        flowVizToggle: document.getElementById('flowVizToggle'),
+        particleTrailsToggle: document.getElementById('particleTrailsToggle'),
         playPauseButton: document.getElementById('playPauseButton'),
         resetButton: document.getElementById('resetButton'),
         hrValue: document.getElementById('hrValue'),
@@ -426,6 +437,26 @@ window.onload = function() {
         crossSectionPlane.visible = false;
         scene.add(crossSectionPlane);
 
+        // Initialize particle system
+        const numParticles = 100;
+        const positions = new Float32Array(numParticles * 3);
+        const velocities = new Float32Array(numParticles * 3);
+        for (let i = 0; i < numParticles; i++) {
+            positions[i * 3] = (Math.random() - 0.5) * 4;
+            positions[i * 3 + 1] = (Math.random() - 0.5) * 4;
+            positions[i * 3 + 2] = (Math.random() - 0.5) * 4;
+            velocities[i * 3] = (Math.random() - 0.5) * 0.02;
+            velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.02;
+            velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.02;
+        }
+        particleGeometry = new THREE.BufferGeometry();
+        particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        particleMaterial = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.05, transparent: true, opacity: 0.6 });
+        particlePoints = new THREE.Points(particleGeometry, particleMaterial);
+        particles = velocities;
+        scene.add(particlePoints);
+        particlePoints.visible = false;
+
         console.log('Graphics initialized, scene has', scene.children.length, 'children');
     }
 
@@ -500,6 +531,67 @@ window.onload = function() {
             crossSectionPlane.visible = true;
         } else {
             crossSectionPlane.visible = false;
+        }
+
+        // Flow visualization arrows
+        if (isFlowViz) {
+            flowArrows.forEach(arrow => scene.remove(arrow));
+            flowArrows = [];
+
+            const geo = icosahedronGeometry();
+            for (let i = 0; i < geo.vertices.length; i++) {
+                let quadIdx = 0;
+                if (geo.vertices[i][0] > 0) quadIdx += 1;
+                if (geo.vertices[i][1] < 0) quadIdx += 2;
+
+                const avgU = model.getQuadrantAverage(quadrants[quadIdx]);
+                const phase = sync.getPhase(quadIdx);
+
+                // Compute flow direction based on gradient
+                const pos = geo.vertices[i].map(v => v * 2.0);
+                const dir = new THREE.Vector3(
+                    Math.cos(phase) * avgU,
+                    Math.sin(phase) * avgU,
+                    0
+                ).normalize();
+
+                const arrowHelper = new THREE.ArrowHelper(
+                    dir,
+                    new THREE.Vector3(...pos),
+                    0.3 * avgU,
+                    0xff9900,
+                    0.1,
+                    0.05
+                );
+                flowArrows.push(arrowHelper);
+                scene.add(arrowHelper);
+            }
+        } else {
+            flowArrows.forEach(arrow => scene.remove(arrow));
+            flowArrows = [];
+        }
+
+        // Particle trails
+        if (isParticleTrails) {
+            particlePoints.visible = true;
+            const positions = particleGeometry.attributes.position.array;
+            const avgU = model.getAverageU();
+
+            for (let i = 0; i < positions.length / 3; i++) {
+                const idx = i * 3;
+                // Update particle positions based on velocities
+                positions[idx] += particles[idx] * (1 + avgU * 2);
+                positions[idx + 1] += particles[idx + 1] * (1 + avgU * 2);
+                positions[idx + 2] += particles[idx + 2] * (1 + avgU * 2);
+
+                // Wrap particles around bounds
+                if (Math.abs(positions[idx]) > 2) positions[idx] = -Math.sign(positions[idx]) * 2;
+                if (Math.abs(positions[idx + 1]) > 2) positions[idx + 1] = -Math.sign(positions[idx + 1]) * 2;
+                if (Math.abs(positions[idx + 2]) > 2) positions[idx + 2] = -Math.sign(positions[idx + 2]) * 2;
+            }
+            particleGeometry.attributes.position.needsUpdate = true;
+        } else {
+            particlePoints.visible = false;
         }
 
         controls.update();
@@ -686,6 +778,22 @@ window.onload = function() {
         scene.add(nodeMesh);
         console.log('Setup complete: nodeMesh has', geo.vertices.length, 'instances');
 
+        // Create wireframe edges
+        if (wireframe) scene.remove(wireframe);
+        const edgePoints = [];
+        geo.faces.forEach(face => {
+            for (let i = 0; i < 3; i++) {
+                const v1 = geo.vertices[face[i]].map(v => v * 2.0);
+                const v2 = geo.vertices[face[(i + 1) % 3]].map(v => v * 2.0);
+                edgePoints.push(new THREE.Vector3(...v1));
+                edgePoints.push(new THREE.Vector3(...v2));
+            }
+        });
+        const wireframeGeo = new THREE.BufferGeometry().setFromPoints(edgePoints);
+        const wireframeMat = new THREE.LineBasicMaterial({ color: 0x444444, linewidth: 1 });
+        wireframe = new THREE.LineSegments(wireframeGeo, wireframeMat);
+        scene.add(wireframe);
+
         if (telemetryChart) telemetryChart.destroy();
         initChart();
         lastUpdateTime = Date.now();
@@ -728,6 +836,8 @@ window.onload = function() {
     });
     dom.crossSectionToggle.addEventListener('change', () => isCrossSection = dom.crossSectionToggle.checked);
     dom.colorToggle.addEventListener('change', () => isColorCoded = dom.colorToggle.checked);
+    dom.flowVizToggle.addEventListener('change', () => isFlowViz = dom.flowVizToggle.checked);
+    dom.particleTrailsToggle.addEventListener('change', () => isParticleTrails = dom.particleTrailsToggle.checked);
     dom.playPauseButton.addEventListener('click', () => {
         isPaused = !isPaused;
         dom.playPauseButton.textContent = isPaused ? 'Play' : 'Pause';
