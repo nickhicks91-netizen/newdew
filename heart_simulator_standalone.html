@@ -257,7 +257,7 @@
         <div class="telemetry-card flex-grow">
             <canvas id="telemetryCanvas"></canvas>
         </div>
-        <div class="telemetry-card flex-grow mt-2">
+        <div class="telemetry-card flex-grow mt-2" style="height: 150px;">
             <h4 class="text-xs font-bold text-center text-gray-400 mb-1">LV Pressure-Volume Loop</h4>
             <canvas id="pvLoopCanvas" style="width: 100%; height: 120px;"></canvas>
         </div>
@@ -691,8 +691,10 @@ window.onload = function() {
         const laMatChamber = new THREE.MeshStandardMaterial({
             color: ChamberColors.LA,
             transparent: true,
-            opacity: 0.7,
-            side: THREE.DoubleSide
+            opacity: 0.85,
+            side: THREE.DoubleSide,
+            emissive: ChamberColors.LA,
+            emissiveIntensity: 0.2
         });
         chamberMeshes.LA = new THREE.Mesh(laGeo, laMatChamber);
         chamberMeshes.LA.position.set(-0.6, 0.8, 0);
@@ -703,8 +705,10 @@ window.onload = function() {
         const raMatChamber = new THREE.MeshStandardMaterial({
             color: ChamberColors.RA,
             transparent: true,
-            opacity: 0.7,
-            side: THREE.DoubleSide
+            opacity: 0.85,
+            side: THREE.DoubleSide,
+            emissive: ChamberColors.RA,
+            emissiveIntensity: 0.2
         });
         chamberMeshes.RA = new THREE.Mesh(raGeo, raMatChamber);
         chamberMeshes.RA.position.set(0.6, 0.8, 0);
@@ -715,8 +719,10 @@ window.onload = function() {
         const lvMatChamber = new THREE.MeshStandardMaterial({
             color: ChamberColors.LV,
             transparent: true,
-            opacity: 0.7,
-            side: THREE.DoubleSide
+            opacity: 0.85,
+            side: THREE.DoubleSide,
+            emissive: ChamberColors.LV,
+            emissiveIntensity: 0.2
         });
         chamberMeshes.LV = new THREE.Mesh(lvGeo, lvMatChamber);
         chamberMeshes.LV.position.set(-0.6, -0.4, 0);
@@ -727,8 +733,10 @@ window.onload = function() {
         const rvMatChamber = new THREE.MeshStandardMaterial({
             color: ChamberColors.RV,
             transparent: true,
-            opacity: 0.7,
-            side: THREE.DoubleSide
+            opacity: 0.85,
+            side: THREE.DoubleSide,
+            emissive: ChamberColors.RV,
+            emissiveIntensity: 0.2
         });
         chamberMeshes.RV = new THREE.Mesh(rvGeo, rvMatChamber);
         chamberMeshes.RV.position.set(0.6, -0.4, 0);
