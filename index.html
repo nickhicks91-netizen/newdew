@@ -223,8 +223,43 @@
             <span class="font-bold text-lg text-red-400">Regurg Proxy</span>
             <span id="regurgDisplay" class="font-mono text-xl font-bold text-white">-- %</span>
         </div>
+        <div class="border-t border-gray-700 pt-2 mt-2">
+            <h3 class="text-md font-bold text-center text-cyan-400 mb-2">Artificial Heart Validation</h3>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-sm text-cyan-400">Power Consumption</span>
+            <span id="powerDisplay" class="font-mono text-lg font-bold text-white">-- W</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-sm text-cyan-400">Hydraulic Efficiency</span>
+            <span id="efficiencyDisplay" class="font-mono text-lg font-bold text-white">-- %</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-sm text-yellow-400">Hemolysis Status</span>
+            <span id="hemolysisStatus" class="font-mono text-lg font-bold text-green-400">SAFE</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-sm text-purple-400">Preload Reserve</span>
+            <span id="preloadDisplay" class="font-mono text-lg font-bold text-white">-- %</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-sm text-purple-400">INTERMACS Level</span>
+            <span id="intermacs Display" class="font-mono text-lg font-bold text-white">--</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-sm text-green-400">Device vs HeartMate 3</span>
+            <span id="benchmarkDisplay" class="font-mono text-lg font-bold text-white">--</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-sm text-blue-400">Reliability (MTBF)</span>
+            <span id="mtbfDisplay" class="font-mono text-lg font-bold text-white">-- yrs</span>
+        </div>
         <div class="telemetry-card flex-grow">
             <canvas id="telemetryCanvas"></canvas>
+        </div>
+        <div class="telemetry-card flex-grow mt-2">
+            <h4 class="text-xs font-bold text-center text-gray-400 mb-1">LV Pressure-Volume Loop</h4>
+            <canvas id="pvLoopCanvas" style="width: 100%; height: 120px;"></canvas>
         </div>
     </div>
 
@@ -320,12 +355,40 @@ window.onload = function() {
         shearDisplay: document.getElementById('shearDisplay'),
         hemolysisDisplay: document.getElementById('hemolysisDisplay'),
         regurgDisplay: document.getElementById('regurgDisplay'),
-        telemetryCanvas: document.getElementById('telemetryCanvas')
+        powerDisplay: document.getElementById('powerDisplay'),
+        efficiencyDisplay: document.getElementById('efficiencyDisplay'),
+        hemolysisStatus: document.getElementById('hemolysisStatus'),
+        preloadDisplay: document.getElementById('preloadDisplay'),
+        intermacsDisplay: document.getElementById('intermacsDisplay'),
+        benchmarkDisplay: document.getElementById('benchmarkDisplay'),
+        mtbfDisplay: document.getElementById('mtbfDisplay'),
+        telemetryCanvas: document.getElementById('telemetryCanvas'),
+        pvLoopCanvas: document.getElementById('pvLoopCanvas')
     };
 
     const SimConfig = { dt: 0.01, noise: 0.05, k: 1.0, kappa: 0.5, rsa: 0.2, svr: 1200, target_map: 90, baro_sensitivity: 1.0 };
     const ChamberColors = { RA: new THREE.Color("#3b82f6"), LA: new THREE.Color("#8b5cf6"), RV: new THREE.Color("#22c55e"), LV: new THREE.Color("#eab308") };
     const BIVACOR_BENCHMARK = { hr: [50, 60, 70, 80, 90, 100, 110, 120], co: [3.5, 4.2, 4.8, 5.3, 5.7, 6.0, 6.1, 6.0] };
+
+    // Clinical thresholds for artificial heart validation
+    const CLINICAL_THRESHOLDS = {
+        hemolysis_safe: 0.01,      // g/100L - FDA threshold
+        hemolysis_warning: 0.02,    // g/100L
+        hemolysis_critical: 0.05,   // g/100L
+        shear_stress_safe: 150,     // Pa - below RBC damage threshold
+        shear_stress_warning: 250,  // Pa
+        power_target: 8,            // Watts - HeartMate 3 average
+        efficiency_min: 20,         // % - minimum acceptable
+        mtbf_target: 5              // years - FDA requirement
+    };
+
+    // Device comparison benchmarks
+    const DEVICE_BENCHMARKS = {
+        HeartMate3: { power: 6.5, efficiency: 23, hemolysis: 0.008, mtbf: 10 },
+        HVAD: { power: 4.5, efficiency: 18, hemolysis: 0.015, mtbf: 5 },
+        BiVACOR: { power: 9.0, efficiency: 25, hemolysis: 0.006, mtbf: 15 },
+        CARMAT: { power: 12.0, efficiency: 20, hemolysis: 0.012, mtbf: 3 }
+    };
 
     // Real ECG waveform data (normalized, 60 BPM normal sinus rhythm, 1 cardiac cycle)
     const REAL_ECG_DATA = [
@@ -335,6 +398,7 @@ window.onload = function() {
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 // 60 samples = 1 second at 60 Hz
     ];
     let ecgBuffer = [], ecgCorrelation = 0;
+    let pvLoopData = [], pvLoopChart, deviceScore = 0, cumulativeStress = 0, operatingHours = 0;
     const Presets = {
         normal: { hr: 60, rsa: 0.2, noise: 0.05, k: 1.0, kappa: 0.5 },
         tachycardia: { hr: 120, rsa: 0.1, noise: 0.1, k: 0.7, kappa: 0.6 },
@@ -1004,6 +1068,46 @@ window.onload = function() {
                 plugins: { legend: { labels: { color: '#f3f4f6' } } }
             }
         });
+
+        // Initialize PV Loop chart (Pressure-Volume loop for Frank-Starling validation)
+        pvLoopChart = new Chart(dom.pvLoopCanvas, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'LV P-V Loop',
+                    data: [],
+                    borderColor: '#fbbf24',
+                    backgroundColor: 'rgba(251, 191, 36, 0.3)',
+                    showLine: true,
+                    pointRadius: 0,
+                    borderWidth: 2,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Volume (mL)', color: '#9ca3af', font: { size: 9 } },
+                        min: 40,
+                        max: 130,
+                        ticks: { color: '#9ca3af', font: { size: 8 } }
+                    },
+                    y: {
+                        title: { display: true, text: 'Pressure (mmHg)', color: '#9ca3af', font: { size: 9 } },
+                        min: 0,
+                        max: 140,
+                        ticks: { color: '#9ca3af', font: { size: 8 } }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { enabled: false }
+                }
+            }
+        });
     }
 
     function updateGraphics() {
@@ -1396,6 +1500,93 @@ window.onload = function() {
             regurgitationProxy *= 1.5; // Amplify proxy when interactions active
         }
         dom.regurgDisplay.textContent = `${regurgitationProxy.toFixed(1)} %`;
+
+        // ========== ARTIFICIAL HEART VALIDATION METRICS ==========
+
+        // 1. Power Consumption (based on flow work + mechanical losses)
+        const hydraulicWork = data.co * (data.sys - data.dias) / 60 * 0.00133322; // Convert to Watts
+        const mechanicalLosses = 1.5 + 0.01 * data.hr; // Bearing friction + viscous losses
+        const powerConsumption = hydraulicWork + mechanicalLosses;
+        dom.powerDisplay.textContent = `${powerConsumption.toFixed(1)} W`;
+
+        // 2. Hydraulic Efficiency = hydraulic work / total power
+        const efficiency = (hydraulicWork / powerConsumption) * 100;
+        dom.efficiencyDisplay.textContent = `${efficiency.toFixed(1)} %`;
+
+        // 3. Hemolysis Status (clinical threshold validation)
+        let hemStatus = 'SAFE';
+        let hemColor = '#22c55e';
+        if (data.hemolysisIndex > CLINICAL_THRESHOLDS.hemolysis_critical) {
+            hemStatus = 'CRITICAL';
+            hemColor = '#ef4444';
+        } else if (data.hemolysisIndex > CLINICAL_THRESHOLDS.hemolysis_warning) {
+            hemStatus = 'WARNING';
+            hemColor = '#f59e0b';
+        } else if (data.hemolysisIndex > CLINICAL_THRESHOLDS.hemolysis_safe) {
+            hemStatus = 'CAUTION';
+            hemColor = '#eab308';
+        }
+        dom.hemolysisStatus.textContent = hemStatus;
+        dom.hemolysisStatus.style.color = hemColor;
+
+        // 4. Preload Reserve (how much more the heart can fill before suction)
+        const lvVolume = chamberVolumes.LV || 80;
+        const maxSafeVolume = 140; // mL - before suction occurs
+        const preloadReserve = ((maxSafeVolume - lvVolume) / maxSafeVolume) * 100;
+        dom.preloadDisplay.textContent = `${Math.max(0, preloadReserve).toFixed(0)} %`;
+
+        // 5. INTERMACS Level (clinical endpoint classification)
+        let intermacs = 7; // Default: stable
+        if (data.co < 2.0) intermacs = 1; // Cardiogenic shock
+        else if (data.co < 2.5) intermacs = 2; // Progressive decline
+        else if (data.co < 3.0 && data.sys < 90) intermacs = 3; // Stable inotrope dependent
+        else if (data.co < 3.5) intermacs = 4; // Resting symptoms
+        else if (data.co < 4.0) intermacs = 5; // Exertion intolerant
+        else if (data.co < 4.5) intermacs = 6; // Exertion limited
+        dom.intermacsDisplay.textContent = `${intermacs}`;
+
+        // 6. Device vs HeartMate 3 Comparison Score
+        const hm3 = DEVICE_BENCHMARKS.HeartMate3;
+        let score = 0;
+        if (powerConsumption < hm3.power * 1.2) score += 25; // Power within 20%
+        if (efficiency > hm3.efficiency * 0.8) score += 25; // Efficiency within 20%
+        if (data.hemolysisIndex < hm3.hemolysis * 1.5) score += 25; // Hemolysis better
+        if (data.co >= 3.5 && data.co <= 6.5) score += 25; // Physiological CO range
+        let rating = score >= 75 ? 'SUPERIOR' : score >= 50 ? 'EQUIVALENT' : 'INFERIOR';
+        dom.benchmarkDisplay.textContent = `${rating} (${score})`;
+
+        // 7. Reliability (MTBF estimation based on stress accumulation)
+        operatingHours += SimConfig.dt / 3600; // Convert seconds to hours
+        cumulativeStress += (data.shearProxy / CLINICAL_THRESHOLDS.shear_stress_safe) * SimConfig.dt;
+        const wearRate = cumulativeStress / operatingHours; // Stress accumulation rate
+        const mtbf = CLINICAL_THRESHOLDS.mtbf_target * Math.exp(-wearRate / 10); // Exponential degradation
+        dom.mtbfDisplay.textContent = `${Math.max(0.1, mtbf).toFixed(1)} yrs`;
+
+        // 8. Update Pressure-Volume Loop
+        if (chamberVolumes.LV) {
+            const lvPhase = sync.getPhase(2);
+            const normalizedPhase = (lvPhase % (2 * Math.PI)) / (2 * Math.PI);
+
+            // Calculate LV pressure based on phase
+            let lvPressure;
+            if (normalizedPhase >= 0.2 && normalizedPhase < 0.5) {
+                // Isovolumetric contraction + ejection (systole)
+                const systolicPhase = (normalizedPhase - 0.2) / 0.3;
+                lvPressure = 8 + (data.sys - 8) * Math.sin(systolicPhase * Math.PI);
+            } else {
+                // Isovolumetric relaxation + filling (diastole)
+                lvPressure = 8;
+            }
+
+            pvLoopData.push({ x: chamberVolumes.LV, y: lvPressure });
+            if (pvLoopData.length > 100) pvLoopData.shift(); // Keep last 100 points (1-2 cycles)
+
+            // Update PV loop chart
+            if (pvLoopChart) {
+                pvLoopChart.data.datasets[0].data = pvLoopData;
+                pvLoopChart.update('none');
+            }
+        }
         const chart = telemetryChart.data;
         const time = performance.now()/1000;
         chart.labels.push(time);
