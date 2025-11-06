@@ -236,12 +236,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 window.onload = function() {
-    let scene, camera, renderer, controls, chamberMeshes = [], telemetryChart, phantomFlowField;
+    let scene, camera, renderer, controls, nodeMesh, telemetryChart, phantomFlowField;
     let crossSectionPlane, crossSectionTexture, crossSectionCanvas, crossSectionCtx, isCrossSection = false;
     let animationFrameId, lastUpdateTime = 0;
     let isPaused = false, isPhantomMode = false, isValidateMode = false, isBaroreflexOn = true;
     let exportBuffer = [];
-    let models, sync;
+    let model, sync;
     let baseHR = 60; // Store base HR separately from displayed HR
 
     const dom = {
@@ -290,7 +290,23 @@ window.onload = function() {
         arrhythmia: { hr: 80, rsa: 0.4, noise: 0.15, k: 0.5, kappa: 0.8 }
     };
 
-    // Aliev-Panfilov Model Class (per chamber)
+    function icosahedronGeometry() {
+        const phi = (1 + Math.sqrt(5)) / 2;
+        const vertices = [
+            [-1, phi, 0], [1, phi, 0], [-1, -phi, 0], [1, -phi, 0],
+            [0, -1, phi], [0, 1, phi], [0, -1, -phi], [0, 1, -phi],
+            [phi, 0, -1], [phi, 0, 1], [-phi, 0, -1], [-phi, 0, 1]
+        ].map(v => v.map(x => x / Math.sqrt(1 + phi**2)));
+        const faces = [
+            [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+            [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+            [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+            [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]
+        ];
+        return { vertices, faces };
+    }
+
+    // Aliev-Panfilov Model Class (single unified model with quadrant support)
     class AlievPanfilov {
       constructor(size = 50, dt = 0.01) {
         this.size = size;
@@ -339,6 +355,20 @@ window.onload = function() {
         }
       }
       getAverageU() { return this.u.reduce((sum, val) => sum + val, 0) / this.n; }
+      getQuadrantAverage(quadrant) {
+        // Divide grid into 4 quadrants for chambers (LA, RA, LV, RV)
+        const quadSize = Math.floor(this.size / 2);
+        let sum = 0, count = 0;
+        const startI = (quadrant.row === 0) ? 0 : quadSize;
+        const startJ = (quadrant.col === 0) ? 0 : quadSize;
+        for (let i = startI; i < startI + quadSize; i++) {
+          for (let j = startJ; j < startJ + quadSize; j++) {
+            sum += this.u[this.idx(i, j)];
+            count++;
+          }
+        }
+        return sum / count;
+      }
       getShearProxy() {
         // Simplified shear stress proxy based on potential gradients
         let shear = 0;
@@ -462,23 +492,42 @@ window.onload = function() {
     }
 
     function updateGraphics() {
-        const positions = [[-1.5, 1.5, 0], [1.5, 1.5, 0], [-1.5, -1.5, 0], [1.5, -1.5, 0]];
-        const scales = [0.8, 0.8, 1.2, 1.2];
-        const colors = [ChamberColors.LA, ChamberColors.RA, ChamberColors.LV, ChamberColors.RV];
-        chamberMeshes.forEach((mesh, i) => {
-            const avgU = models[i].getAverageU();
-            const phase = sync.getPhase(i);
+        const geo = icosahedronGeometry();
+        const dummy = new THREE.Object3D();
+        const color = new THREE.Color();
+        const quadrants = [
+            {row: 0, col: 0, color: ChamberColors.LA},
+            {row: 0, col: 1, color: ChamberColors.RA},
+            {row: 1, col: 0, color: ChamberColors.LV},
+            {row: 1, col: 1, color: ChamberColors.RV}
+        ];
+
+        // Update instanced mesh vertices
+        for (let i = 0; i < geo.vertices.length; i++) {
+            // Assign vertex to quadrant based on position (by coordinate signs)
+            let quadIdx = 0;
+            if (geo.vertices[i][0] > 0) quadIdx += 1;
+            if (geo.vertices[i][1] < 0) quadIdx += 2;
+
+            const avgU = model.getQuadrantAverage(quadrants[quadIdx]);
+            const phase = sync.getPhase(quadIdx);
             const pulsation = 1 + 0.2 * Math.sin(phase) * (1 + 0.5 * avgU);
-            mesh.scale.set(pulsation * scales[i], pulsation * scales[i], pulsation * scales[i]);
-            const emissiveIntensity = 0.2 * (1 + Math.sin(phase)) * (1 + avgU);
-            mesh.material.emissiveIntensity = emissiveIntensity;
-            mesh.material.color.set(colors[i].clone().lerp(new THREE.Color(1,1,1), avgU * 0.5));
-        });
+
+            dummy.position.fromArray(geo.vertices[i]);
+            dummy.scale.set(pulsation, pulsation, pulsation);
+            dummy.updateMatrix();
+            nodeMesh.setMatrixAt(i, dummy.matrix);
+
+            color.copy(quadrants[quadIdx].color).lerp(new THREE.Color(1,1,1), avgU * 0.5);
+            nodeMesh.setColorAt(i, color);
+        }
+        nodeMesh.instanceMatrix.needsUpdate = true;
+        nodeMesh.instanceColor.needsUpdate = true;
 
         // Update cross-section view
         if (isCrossSection) {
-            // Update canvas with u field from LV (models[2])
-            const u = models[2].u;
+            // Update canvas with u field from unified model
+            const u = model.u;
             const imageData = crossSectionCtx.createImageData(50, 50);
             for (let i = 0; i < 50; i++) {
                 for (let j = 0; j < 50; j++) {
@@ -552,11 +601,16 @@ window.onload = function() {
 
         // Phantom flow field
         if (isPhantomMode) {
-            const chamberFlow = models.map(m => m.getAverageU());
+            const quadrants = [{row: 0, col: 0}, {row: 0, col: 1}, {row: 1, col: 0}, {row: 1, col: 1}];
             phantomFlowField = {
                 timestamp: Date.now(),
                 hr: data.hr,
-                chambers: { RA: chamberFlow[1], LA: chamberFlow[0], RV: chamberFlow[3], LV: chamberFlow[2] },
+                chambers: {
+                    RA: model.getQuadrantAverage(quadrants[1]),
+                    LA: model.getQuadrantAverage(quadrants[0]),
+                    RV: model.getQuadrantAverage(quadrants[3]),
+                    LV: model.getQuadrantAverage(quadrants[2])
+                },
                 pressure: { systolic: data.sys, diastolic: data.dias }
             };
         }
@@ -571,21 +625,29 @@ window.onload = function() {
         const elapsed = (now - lastUpdateTime) / 1000;
         if (elapsed > SimConfig.dt) {
             lastUpdateTime = now;
-            models.forEach(m => m.step(SimConfig.noise));
+            model.step(SimConfig.noise);
 
             // Use baseHR for Kuramoto, which can be modulated by baroreflex
             sync.step(SimConfig.dt, SimConfig.rsa, baseHR);
 
-            const avgU = models[0].getAverageU();
-            const ecg = models.reduce((sum, m, i) => sum + (i < 2 ? 0.3 : 0.7) * m.getAverageU() * Math.cos(sync.getPhase(i)), 0);
+            const quadrants = [{row: 0, col: 0}, {row: 0, col: 1}, {row: 1, col: 0}, {row: 1, col: 1}];
+            const avgU = model.getAverageU();
+            const quadAvgs = quadrants.map(q => model.getQuadrantAverage(q));
+
+            // ECG from weighted sum of chamber potentials (ventricles weighted more)
+            const ecg = quadAvgs[0] * 0.3 * Math.cos(sync.getPhase(0)) +
+                        quadAvgs[1] * 0.3 * Math.cos(sync.getPhase(1)) +
+                        quadAvgs[2] * 0.7 * Math.cos(sync.getPhase(2)) +
+                        quadAvgs[3] * 0.7 * Math.cos(sync.getPhase(3));
+
             const gci = sync.getGCI();
-            const plv = sync.getPLV(0, 2);
+            const plv = sync.getPLV(0, 2); // LA-LV phase locking
             const energy = sync.getEnergy();
             const winding = Math.round(SimConfig.kappa * sync.getPhase(0) / (2 * Math.PI)) % 2;
             const ejectionFraction = 0.55 + 0.15 * gci;
-            const spiralDetection = models[0].detectSpiralWaves();
-            const shearProxy = models[0].getShearProxy(); // Example from LA
-            const hemolysisIndex = models[0].getHemolysisIndex();
+            const spiralDetection = model.detectSpiralWaves();
+            const shearProxy = model.getShearProxy();
+            const hemolysisIndex = model.getHemolysisIndex();
 
             const coherence = gci;
             const sv = 70 * Math.max(0.5, coherence);
@@ -595,7 +657,7 @@ window.onload = function() {
             // Baroreflex adjusts baseHR, not the slider
             if (isBaroreflexOn) {
                 const map_error = SimConfig.target_map - map;
-                const baro_adjust = map_error * 0.5; // Adjusted for better response
+                const baro_adjust = map_error * 0.5;
                 baseHR = Math.max(40, Math.min(180, baseHR + baro_adjust * SimConfig.dt));
             }
 
@@ -638,27 +700,16 @@ window.onload = function() {
 
     function setup() {
         updateSliderValues();
-        models = Array(4).fill().map(() => new AlievPanfilov());
+        model = new AlievPanfilov();
         sync = new KuramotoSync(4, SimConfig.k);
         exportBuffer = [];
         phantomFlowField = null;
-        if (chamberMeshes.length > 0) chamberMeshes.forEach(mesh => scene.remove(mesh));
-        chamberMeshes = [];
-        const positions = [[-1.5, 1.5, 0], [1.5, 1.5, 0], [-1.5, -1.5, 0], [1.5, -1.5, 0]];
-        const scales = [0.8, 0.8, 1.2, 1.2];
-        const colors = [ChamberColors.LA, ChamberColors.RA, ChamberColors.LV, ChamberColors.RV];
-        positions.forEach((pos, i) => {
-            const geo = new THREE.IcosahedronGeometry(scales[i], 2);
-            const mat = new THREE.MeshStandardMaterial({
-                color: colors[i],
-                emissive: colors[i],
-                emissiveIntensity: 0
-            });
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.position.set(...pos);
-            scene.add(mesh);
-            chamberMeshes.push(mesh);
-        });
+        if (nodeMesh) scene.remove(nodeMesh);
+        const geo = icosahedronGeometry();
+        const sphereGeo = new THREE.SphereGeometry(0.1, 16, 12);
+        const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
+        nodeMesh = new THREE.InstancedMesh(sphereGeo, mat, geo.vertices.length);
+        scene.add(nodeMesh);
         if (telemetryChart) telemetryChart.destroy();
         initChart();
         lastUpdateTime = Date.now();
@@ -680,7 +731,7 @@ window.onload = function() {
     dom.validateToggle.addEventListener('change', () => isValidateMode = dom.validateToggle.checked);
     dom.phantomModeToggle.addEventListener('change', () => isPhantomMode = dom.phantomModeToggle.checked);
     dom.crossSectionToggle.addEventListener('change', () => isCrossSection = dom.crossSectionToggle.checked);
-    dom.stimulateButton.addEventListener('click', () => models[0].stimulate());
+    dom.stimulateButton.addEventListener('click', () => model.stimulate());
     dom.exportButton.addEventListener('click', () => {
         if (exportBuffer.length === 0) return alert('No data to export.');
         let csv = 'Time,HR,CO,Sys,Dias,GCI,PLV,Energy,Winding,EF,Spiral,ECG,AvgU,Shear,Hemolysis\n';
