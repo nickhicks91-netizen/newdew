@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HRAT Enhanced Pro v3.1 – Planetary Resonance Analyzer (Optimized)</title>
+
+<!-- THREE.js for 3D rendering - with SRI for security -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.157/build/three.min.js"
+        integrity="sha384-8qhEv7kHTDB0K8YFc0z7wl5KLlwdNvLVmLJkh4kYTd3bBPxGLKIgqH8V7J6k1EFb"
+        crossorigin="anonymous"></script>
+<script src="https://unpkg.com/three@0.157.0/examples/js/controls/OrbitControls.js"></script>
+
+<!-- jsPDF for PDF export -->
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+<style>
+body{
+  margin:0;font-family:"Segoe UI",Arial,sans-serif;
+  background:linear-gradient(135deg,#09101e,#1a2238);
+  color:#e0e6ed;
+}
+header{
+  text-align:center;padding:25px 10px;
+  background:linear-gradient(135deg,#1e3a5f,#2d5a8a);
+  color:#64b5f6;
+  box-shadow:0 6px 18px rgba(0,0,0,.4);
+}
+main{display:grid;grid-template-columns:320px 1fr;gap:20px;max-width:1400px;margin:0 auto;padding:20px;}
+@media(max-width:900px){main{grid-template-columns:1fr;}}
+
+.panel{
+  background:rgba(30,39,55,.85);
+  border-radius:12px;padding:20px;
+  box-shadow:0 4px 16px rgba(0,0,0,.3);
+}
+button,select{
+  width:100%;padding:10px;margin:5px 0 15px;
+  border-radius:8px;border:none;
+  background:linear-gradient(135deg,#1976d2,#1565c0);
+  color:#fff;font-weight:600;cursor:pointer;
+  transition:background 0.3s;
+}
+button:hover{background:linear-gradient(135deg,#1565c0,#0d47a1);}
+button:disabled{background:#455a64;cursor:not-allowed;}
+label{color:#90caf9;font-weight:600;}
+#viewer{width:100%;height:500px;border-radius:10px;background:#000;position:relative;}
+table{width:100%;border-collapse:collapse;margin-top:10px;}
+th,td{border-bottom:1px solid #455a64;padding:8px;text-align:left;}
+th{color:#64b5f6;}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin:15px 0;}
+.stat-card{background:#263238;border:1px solid #455a64;border-radius:10px;padding:15px;text-align:center;}
+.stat-value{font-size:1.4em;color:#81c784;font-weight:700;}
+.loading{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  color:#64b5f6;font-size:1.2em;display:none;
+}
+.error{
+  background:#b71c1c;color:#fff;padding:10px;border-radius:8px;margin:10px 0;
+  display:none;
+}
+footer{text-align:center;padding:10px;font-size:.8em;color:#78909c;}
+</style>
+</head>
+<body>
+<header>
+  <h1>⚡ HRAT Enhanced Pro v3.1 (Optimized)</h1>
+  <p>Offline Harmonic Resonance Analyzer with 3D Planetary Visualization</p>
+</header>
+
+<main>
+  <div class="panel">
+    <label for="bodySelect">🌍 Select Celestial Body</label>
+    <select id="bodySelect" aria-label="Select celestial body"></select>
+    <button id="runBtn" aria-label="Run analysis">🚀 Run Analysis</button>
+    <button id="csvBtn" aria-label="Export to CSV">⬇ Export CSV</button>
+    <button id="jsonBtn" aria-label="Export to JSON">⬇ Export JSON</button>
+    <button id="pdfBtn" aria-label="Export to PDF">🧾 Export PDF</button>
+    <div id="infoBox"></div>
+    <div id="errorBox" class="error"></div>
+  </div>
+
+  <div class="panel">
+    <div id="viewer">
+      <div class="loading" id="loading">Loading 3D View...</div>
+    </div>
+    <div id="results"></div>
+  </div>
+</main>
+<footer>HRAT Enhanced Pro © 2025 | SOLOS Institute | Offline Static Dataset Mode | v3.1 Optimized</footer>
+
+<script>
+"use strict";
+
+// ========== CONSTANTS ==========
+const SPEED_OF_LIGHT_M_S = 2.99792458e8;
+const MEASUREMENT_CRITERION = 0.25;
+const DEFAULT_FREQUENCY_STEP = 0.05;
+const SPHERE_SEGMENTS = 32; // Reduced from 64 for better performance
+const RING_SEGMENTS = 64; // Reduced from 128
+
+// ========== STATIC NASA PLANETARY DATASET ==========
+const planetaryData = {
+  "Earth": {
+    radius_km: 6371,
+    color: 0x4A90E2,
+    boundaries: [
+      {name: "Kármán Line", h_km: 100, f_range: [7, 10]},
+      {name: "Turbopause", h_km: 120, f_range: [7, 10]}
+    ],
+    desc: "Our home planet with magnetosphere and layered atmosphere."
+  },
+  "Venus": {
+    radius_km: 6052,
+    color: 0xFFD54F,
+    boundaries: [
+      {name: "Exobase", h_km: 200, f_range: [10, 20]}
+    ],
+    desc: "Dense CO₂ atmosphere and runaway greenhouse effect."
+  },
+  "Mars": {
+    radius_km: 3390,
+    color: 0xE57373,
+    boundaries: [
+      {name: "Mesopause", h_km: 100, f_range: [15, 25]}
+    ],
+    desc: "Thin atmosphere and ancient hydrologic features."
+  },
+  "Titan": {
+    radius_km: 2575,
+    color: 0xFFB74D,
+    boundaries: [
+      {name: "Atmopause", h_km: 1000, f_range: [20, 40]},
+      {name: "Ice-Ocean Interface", h_km: 60, f_range: [20, 40]}
+    ],
+    desc: "Nitrogen atmosphere and hydrocarbon lakes."
+  },
+  "Europa": {
+    radius_km: 1561,
+    color: 0xB3E5FC,
+    boundaries: [
+      {name: "Exobase", h_km: 400, f_range: [200, 300]},
+      {name: "Ice-Ocean Interface", h_km: 30, f_range: [200, 300]}
+    ],
+    desc: "Subsurface ocean beneath ice crust."
+  },
+  "Ganymede": {
+    radius_km: 2634,
+    color: 0x90CAF9,
+    boundaries: [
+      {name: "Ocean-Mantle Interface", h_km: 250, f_range: [250, 350]},
+      {name: "Ice Shell", h_km: 150, f_range: [250, 350]}
+    ],
+    desc: "Largest moon with intrinsic magnetic field."
+  },
+  "Enceladus": {
+    radius_km: 252,
+    color: 0xE1F5FE,
+    boundaries: [
+      {name: "Plume Top", h_km: 200, f_range: [200, 300]},
+      {name: "Ice-Ocean Interface", h_km: 25, f_range: [200, 300]}
+    ],
+    desc: "Active water plumes at south pole."
+  },
+  "Proxima b": {
+    radius_km: 7160,
+    color: 0xF48FB1,
+    boundaries: [
+      {name: "Mesopause", h_km: 90, f_range: [10, 20]}
+    ],
+    desc: "Closest exoplanet in habitable zone."
+  },
+  "TRAPPIST-1e": {
+    radius_km: 5800,
+    color: 0xCE93D8,
+    boundaries: [
+      {name: "Kármán-like", h_km: 100, f_range: [10, 20]}
+    ],
+    desc: "Earth-sized exoplanet in habitable zone."
+  }
+};
+
+// ========== GLOBAL STATE ==========
+let scene, camera, renderer, controls, planetMesh, ringMeshes = [];
+let lastAnalysisData = null;
+let textureCache = new Map();
+
+// ========== UTILITY FUNCTIONS ==========
+
+/**
+ * Show error message to user
+ */
+function showError(message) {
+  const errorBox = document.getElementById("errorBox");
+  errorBox.textContent = message;
+  errorBox.style.display = "block";
+  setTimeout(() => {
+    errorBox.style.display = "none";
+  }, 5000);
+}
+
+/**
+ * Show/hide loading indicator
+ */
+function setLoading(isLoading) {
+  document.getElementById("loading").style.display = isLoading ? "block" : "none";
+  document.getElementById("runBtn").disabled = isLoading;
+}
+
+/**
+ * Calculate resonance ratio and delta
+ * @param {number} altitude_km - Altitude in kilometers
+ * @param {number} frequency_hz - Frequency in Hertz
+ * @returns {Object} {ratio, delta}
+ */
+function computeResonanceDelta(altitude_km, frequency_hz) {
+  const altitude_m = altitude_km * 1000;
+  const ratio = SPEED_OF_LIGHT_M_S / (altitude_m * frequency_hz);
+  const fractionalPart = ratio - Math.floor(ratio);
+  const delta = Math.min(fractionalPart, 1 - fractionalPart);
+  return {ratio, delta};
+}
+
+/**
+ * Calculate median of an array
+ */
+function median(arr) {
+  if (!arr || arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Optimized frequency sweep to find optimal resonance
+ * @param {Array<number>} altitudeList - List of altitudes in km
+ * @param {number} freqMin - Minimum frequency
+ * @param {number} freqMax - Maximum frequency
+ * @param {number} step - Frequency step size
+ * @returns {Object} {optimalFreq, minDelta}
+ */
+function sensitivitySweep(altitudeList, freqMin, freqMax, step = DEFAULT_FREQUENCY_STEP) {
+  let optimalFreq = freqMin;
+  let minDelta = 1;
+
+  // Pre-convert altitudes to meters for optimization
+  const altitudes_m = altitudeList.map(h => h * 1000);
+
+  for (let freq = freqMin; freq <= freqMax; freq += step) {
+    // Compute deltas for all altitudes at this frequency
+    const deltas = altitudes_m.map(alt_m => {
+      const ratio = SPEED_OF_LIGHT_M_S / (alt_m * freq);
+      const frac = ratio - Math.floor(ratio);
+      return Math.min(frac, 1 - frac);
+    });
+
+    const medianDelta = median(deltas);
+    if (medianDelta < minDelta) {
+      minDelta = medianDelta;
+      optimalFreq = freq;
+    }
+  }
+
+  return {optimalFreq, minDelta};
+}
+
+// ========== 3D VISUALIZATION ==========
+
+/**
+ * Clean up previous 3D scene
+ */
+function cleanup3D() {
+  if (renderer) {
+    renderer.dispose();
+    renderer.forceContextLoss();
+  }
+  if (scene) {
+    scene.traverse(obj => {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(mat => mat.dispose());
+        } else {
+          obj.material.dispose();
+        }
+      }
+    });
+    scene.clear();
+  }
+  ringMeshes = [];
+}
+
+/**
+ * Handle window resize
+ */
+function onWindowResize() {
+  if (!camera || !renderer) return;
+  const container = document.getElementById("viewer");
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(width, height);
+}
+
+/**
+ * Initialize 3D visualization
+ */
+function init3D(bodyData) {
+  try {
+    setLoading(true);
+    const container = document.getElementById("viewer");
+    container.innerHTML = '<div class="loading" id="loading">Loading 3D View...</div>';
+
+    // Clean up previous scene
+    cleanup3D();
+
+    // Create scene
+    scene = new THREE.Scene();
+    const aspect = container.clientWidth / container.clientHeight;
+    camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
+
+    // Create renderer
+    renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio for performance
+    container.appendChild(renderer.domElement);
+
+    // Setup controls
+    if (typeof THREE.OrbitControls !== 'undefined') {
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.enablePan = false;
+      controls.autoRotate = false;
+      controls.minDistance = 1.5;
+      controls.maxDistance = 10;
+    } else {
+      console.warn("OrbitControls not available");
+    }
+
+    // Add lights
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(5, 5, 5);
+    scene.add(directionalLight);
+    scene.add(new THREE.AmbientLight(0x404040, 0.5));
+
+    // Create planet sphere with solid color (fallback)
+    const geometry = new THREE.SphereGeometry(1, SPHERE_SEGMENTS, SPHERE_SEGMENTS);
+    const material = new THREE.MeshStandardMaterial({
+      color: bodyData.color,
+      metalness: 0.2,
+      roughness: 0.8
+    });
+
+    planetMesh = new THREE.Mesh(geometry, material);
+    scene.add(planetMesh);
+
+    // Create boundary rings
+    ringMeshes = [];
+    bodyData.boundaries.forEach((boundary, index) => {
+      const ringRadius = 1 + 0.05 * (index + 1);
+      const ringGeo = new THREE.RingGeometry(
+        ringRadius,
+        ringRadius + 0.01,
+        RING_SEGMENTS
+      );
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: bodyData.color,
+        side: THREE.DoubleSide,
+        opacity: 0.4,
+        transparent: true
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = Math.PI / 2;
+      scene.add(ring);
+      ringMeshes.push(ring);
+    });
+
+    // Position camera
+    camera.position.set(0, 0, 3);
+
+    // Animation loop
+    function animate() {
+      requestAnimationFrame(animate);
+      if (controls) controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    setLoading(false);
+  } catch (error) {
+    setLoading(false);
+    showError("Failed to initialize 3D view: " + error.message);
+    console.error("3D initialization error:", error);
+  }
+}
+
+// ========== ANALYSIS LOGIC ==========
+
+/**
+ * Run harmonic resonance analysis
+ */
+function runAnalysis() {
+  try {
+    const bodyName = bodySelect.value;
+    const bodyData = planetaryData[bodyName];
+
+    if (!bodyData) {
+      showError("Invalid celestial body selected");
+      return null;
+    }
+
+    // Extract altitude list
+    const altitudeList = bodyData.boundaries.map(b => b.h_km);
+
+    // Get frequency range
+    const [freqMin, freqMax] = bodyData.boundaries[0].f_range;
+
+    // Perform frequency sweep
+    const sweep = sensitivitySweep(altitudeList, freqMin, freqMax);
+
+    // Calculate results for each boundary
+    const results = bodyData.boundaries.map(boundary => {
+      const {ratio, delta} = computeResonanceDelta(boundary.h_km, sweep.optimalFreq);
+      return {
+        ...boundary,
+        ratio: ratio,
+        delta: delta,
+        optimalHarmonic: Math.round(ratio)
+      };
+    });
+
+    // Calculate reduction factor
+    const reductionFactor = MEASUREMENT_CRITERION / sweep.minDelta;
+
+    const analysisData = {
+      bodyName: bodyName,
+      bodyData: bodyData,
+      optimalFreq: sweep.optimalFreq,
+      minDelta: sweep.minDelta,
+      measurementCriterion: MEASUREMENT_CRITERION,
+      reductionFactor: reductionFactor,
+      results: results,
+      timestamp: new Date().toISOString()
+    };
+
+    displayResults(analysisData);
+    init3D(bodyData);
+
+    return analysisData;
+  } catch (error) {
+    showError("Analysis failed: " + error.message);
+    console.error("Analysis error:", error);
+    return null;
+  }
+}
+
+/**
+ * Display analysis results
+ */
+function displayResults(data) {
+  const resultsContainer = document.getElementById("results");
+  const infoBox = document.getElementById("infoBox");
+
+  // Update info box
+  infoBox.innerHTML = `<b>${data.bodyData.desc}</b>`;
+
+  // Build results HTML using array join for better performance
+  const htmlParts = [
+    `<h2>${data.bodyName} Results</h2>`,
+    `<div class='stat-grid'>`,
+    `<div class='stat-card'><div>Optimal f_SR (Hz)</div><div class='stat-value'>${data.optimalFreq.toFixed(2)}</div></div>`,
+    `<div class='stat-card'><div>Median δ</div><div class='stat-value'>${data.minDelta.toFixed(6)}</div></div>`,
+    `<div class='stat-card'><div>Reduction Factor</div><div class='stat-value'>${data.reductionFactor.toFixed(1)}×</div></div>`,
+    `</div>`,
+    `<table><thead><tr><th>Boundary</th><th>Altitude (km)</th><th>n opt</th><th>δ</th></tr></thead><tbody>`
+  ];
+
+  data.results.forEach(boundary => {
+    htmlParts.push(
+      `<tr><td>${boundary.name}</td><td>${boundary.h_km}</td><td>${boundary.optimalHarmonic}</td><td>${boundary.delta.toFixed(6)}</td></tr>`
+    );
+  });
+
+  htmlParts.push("</tbody></table>");
+  resultsContainer.innerHTML = htmlParts.join('');
+}
+
+// ========== EXPORT FUNCTIONS ==========
+
+/**
+ * Export results as CSV
+ */
+function exportCSV(data) {
+  if (!data) {
+    showError("No analysis data to export");
+    return;
+  }
+
+  try {
+    const rows = [
+      ["Boundary", "Altitude(km)", "n_opt", "delta"],
+      ...data.results.map(b => [b.name, b.h_km, b.optimalHarmonic, b.delta])
+    ];
+
+    const csv = rows.map(row => row.join(',')).join('\n');
+    const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${data.bodyName}_HRAT_${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  } catch (error) {
+    showError("CSV export failed: " + error.message);
+  }
+}
+
+/**
+ * Export results as JSON
+ */
+function exportJSON(data) {
+  if (!data) {
+    showError("No analysis data to export");
+    return;
+  }
+
+  try {
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], {type: "application/json;charset=utf-8;"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${data.bodyName}_HRAT_${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  } catch (error) {
+    showError("JSON export failed: " + error.message);
+  }
+}
+
+/**
+ * Export results as PDF
+ */
+function exportPDF(data) {
+  if (!data) {
+    showError("No analysis data to export");
+    return;
+  }
+
+  try {
+    const {jsPDF} = window.jspdf;
+    const doc = new jsPDF();
+
+    doc.setFontSize(14);
+    doc.text(`HRAT Enhanced Pro Report – ${data.bodyName}`, 10, 20);
+
+    doc.setFontSize(10);
+    doc.text(`Optimal f_SR = ${data.optimalFreq.toFixed(2)} Hz`, 10, 30);
+    doc.text(`Median δ = ${data.minDelta.toFixed(6)}`, 10, 36);
+    doc.text(`Reduction Factor = ${data.reductionFactor.toFixed(1)}×`, 10, 42);
+    doc.text(`Generated: ${new Date(data.timestamp).toLocaleString()}`, 10, 48);
+
+    let y = 60;
+    doc.text("Boundary Results:", 10, 54);
+
+    data.results.forEach(boundary => {
+      const line = `${boundary.name.padEnd(25)} ${String(boundary.h_km).padStart(8)} km  n=${String(boundary.optimalHarmonic).padStart(4)}  δ=${boundary.delta.toFixed(6)}`;
+      doc.text(line, 10, y);
+      y += 6;
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
+      }
+    });
+
+    doc.save(`${data.bodyName}_HRAT_${Date.now()}.pdf`);
+  } catch (error) {
+    showError("PDF export failed: " + error.message);
+  }
+}
+
+// ========== INITIALIZATION ==========
+
+/**
+ * Populate celestial body dropdown
+ */
+function initializeUI() {
+  const bodySelect = document.getElementById("bodySelect");
+  Object.keys(planetaryData).forEach(bodyName => {
+    const option = document.createElement("option");
+    option.value = bodyName;
+    option.textContent = bodyName;
+    bodySelect.appendChild(option);
+  });
+}
+
+/**
+ * Setup event listeners
+ */
+function setupEventListeners() {
+  document.getElementById("runBtn").onclick = () => {
+    lastAnalysisData = runAnalysis();
+  };
+
+  document.getElementById("csvBtn").onclick = () => {
+    exportCSV(lastAnalysisData);
+  };
+
+  document.getElementById("jsonBtn").onclick = () => {
+    exportJSON(lastAnalysisData);
+  };
+
+  document.getElementById("pdfBtn").onclick = () => {
+    exportPDF(lastAnalysisData);
+  };
+
+  // Handle window resize
+  window.addEventListener('resize', onWindowResize);
+}
+
+/**
+ * Application entry point
+ */
+window.addEventListener("load", () => {
+  try {
+    initializeUI();
+    setupEventListeners();
+
+    // Run initial analysis for Earth
+    bodySelect.value = "Earth";
+    lastAnalysisData = runAnalysis();
+  } catch (error) {
+    showError("Application initialization failed: " + error.message);
+    console.error("Initialization error:", error);
+  }
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  cleanup3D();
+});
+</script>
+</body>
+</html>
