@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HRAT Enhanced Pro v4.0 – Interactive Planetary Resonance Analyzer</title>
+
+<!-- THREE.js for 3D rendering -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.157.0/examples/js/controls/OrbitControls.js"></script>
+
+<!-- jsPDF for PDF export -->
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: linear-gradient(135deg, #09101e, #1a2238);
+  color: #e0e6ed;
+}
+header {
+  text-align: center;
+  padding: 25px 10px;
+  background: linear-gradient(135deg, #1e3a5f, #2d5a8a);
+  color: #64b5f6;
+  box-shadow: 0 6px 18px rgba(0,0,0,.4);
+}
+.version { font-size: 0.9em; opacity: 0.8; }
+main {
+  display: grid;
+  grid-template-columns: 340px 1fr 300px;
+  gap: 20px;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 20px;
+}
+@media(max-width: 1200px) {
+  main { grid-template-columns: 1fr; }
+}
+
+.panel {
+  background: rgba(30, 39, 55, .85);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.3);
+}
+.panel h3 {
+  margin-top: 0;
+  color: #64b5f6;
+  border-bottom: 2px solid #455a64;
+  padding-bottom: 10px;
+}
+button, select {
+  width: 100%;
+  padding: 10px;
+  margin: 5px 0 15px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, #1976d2, #1565c0);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+button:hover { background: linear-gradient(135deg, #1565c0, #0d47a1); }
+button:disabled { background: #455a64; cursor: not-allowed; }
+button.secondary {
+  background: linear-gradient(135deg, #455a64, #37474f);
+}
+button.secondary:hover {
+  background: linear-gradient(135deg, #546e7a, #455a64);
+}
+label {
+  color: #90caf9;
+  font-weight: 600;
+  display: block;
+  margin-top: 10px;
+}
+input[type="range"] {
+  width: 100%;
+  margin: 10px 0;
+}
+.slider-container {
+  background: rgba(0,0,0,0.3);
+  padding: 15px;
+  border-radius: 8px;
+  margin: 15px 0;
+}
+.slider-value {
+  color: #81c784;
+  font-size: 1.2em;
+  font-weight: 700;
+  text-align: center;
+  margin: 10px 0;
+}
+#viewer {
+  width: 100%;
+  height: 600px;
+  border-radius: 10px;
+  background: #000;
+  position: relative;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  font-size: 0.9em;
+}
+th, td {
+  border-bottom: 1px solid #455a64;
+  padding: 8px;
+  text-align: left;
+}
+th {
+  color: #64b5f6;
+  background: rgba(0,0,0,0.3);
+}
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 15px;
+  margin: 15px 0;
+}
+.stat-card {
+  background: #263238;
+  border: 1px solid #455a64;
+  border-radius: 10px;
+  padding: 15px;
+  text-align: center;
+  transition: transform 0.2s;
+}
+.stat-card:hover {
+  transform: translateY(-2px);
+  border-color: #64b5f6;
+}
+.stat-label {
+  font-size: 0.85em;
+  color: #90caf9;
+  margin-bottom: 5px;
+}
+.stat-value {
+  font-size: 1.4em;
+  color: #81c784;
+  font-weight: 700;
+}
+.loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #64b5f6;
+  font-size: 1.2em;
+  display: none;
+  text-align: center;
+}
+.spinner {
+  border: 4px solid rgba(100, 181, 246, 0.3);
+  border-top: 4px solid #64b5f6;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin: 10px auto;
+}
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.error {
+  background: #b71c1c;
+  color: #fff;
+  padding: 10px;
+  border-radius: 8px;
+  margin: 10px 0;
+  display: none;
+}
+.success {
+  background: #2e7d32;
+  color: #fff;
+  padding: 10px;
+  border-radius: 8px;
+  margin: 10px 0;
+  display: none;
+}
+.info-box {
+  background: rgba(100, 181, 246, 0.1);
+  border-left: 4px solid #64b5f6;
+  padding: 12px;
+  margin: 15px 0;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.controls-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  margin: 10px 0;
+}
+.checkbox-item input[type="checkbox"] {
+  width: auto;
+  margin-right: 10px;
+}
+.history-item {
+  background: rgba(0,0,0,0.3);
+  padding: 10px;
+  border-radius: 6px;
+  margin: 5px 0;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-size: 0.85em;
+}
+.history-item:hover {
+  background: rgba(100, 181, 246, 0.2);
+}
+.tooltip {
+  position: relative;
+  display: inline-block;
+  cursor: help;
+  color: #64b5f6;
+  margin-left: 5px;
+}
+.tooltip .tooltiptext {
+  visibility: hidden;
+  width: 200px;
+  background-color: #1e3a5f;
+  color: #fff;
+  text-align: left;
+  border-radius: 6px;
+  padding: 10px;
+  position: absolute;
+  z-index: 1;
+  bottom: 125%;
+  left: 50%;
+  margin-left: -100px;
+  opacity: 0;
+  transition: opacity 0.3s;
+  font-size: 0.85em;
+  font-weight: normal;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+  opacity: 1;
+}
+footer {
+  text-align: center;
+  padding: 10px;
+  font-size: .8em;
+  color: #78909c;
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>⚡ HRAT Enhanced Pro v4.0</h1>
+  <p>Interactive Harmonic Resonance Analyzer with Advanced 3D Visualization</p>
+  <p class="version">Optimized • Real-time Analysis • Multi-Body Comparison</p>
+</header>
+
+<main>
+  <!-- Left Panel: Controls -->
+  <div class="panel">
+    <h3>🎛️ Control Panel</h3>
+
+    <label for="bodySelect">🌍 Select Celestial Body</label>
+    <select id="bodySelect" aria-label="Select celestial body"></select>
+
+    <div class="slider-container">
+      <label for="freqSlider">
+        Frequency (Hz)
+        <span class="tooltip">ℹ️
+          <span class="tooltiptext">Adjust the Schumann resonance frequency for real-time analysis</span>
+        </span>
+      </label>
+      <input type="range" id="freqSlider" min="1" max="500" step="0.1" value="7.83">
+      <div class="slider-value" id="freqValue">7.83 Hz</div>
+      <button id="autoOptimizeBtn" class="secondary">🎯 Auto-Optimize Frequency</button>
+    </div>
+
+    <div class="checkbox-item">
+      <input type="checkbox" id="autoRotateCheck" checked>
+      <label for="autoRotateCheck" style="margin:0;">Auto-Rotate 3D View</label>
+    </div>
+
+    <div class="checkbox-item">
+      <input type="checkbox" id="showLabelsCheck" checked>
+      <label for="showLabelsCheck" style="margin:0;">Show Boundary Labels</label>
+    </div>
+
+    <button id="runBtn">🚀 Run Full Analysis</button>
+
+    <div class="controls-grid">
+      <button id="compareBtn" class="secondary">📊 Compare Mode</button>
+      <button id="screenshotBtn" class="secondary">📸 Screenshot</button>
+    </div>
+
+    <h3>💾 Export Data</h3>
+    <div class="controls-grid">
+      <button id="csvBtn">⬇ CSV</button>
+      <button id="jsonBtn">⬇ JSON</button>
+    </div>
+    <button id="pdfBtn">🧾 Export PDF Report</button>
+
+    <div id="infoBox" class="info-box"></div>
+    <div id="errorBox" class="error"></div>
+    <div id="successBox" class="success"></div>
+  </div>
+
+  <!-- Center Panel: 3D Viewer -->
+  <div class="panel">
+    <h3>🌐 3D Visualization</h3>
+    <div id="viewer">
+      <div class="loading" id="loading">
+        <div class="spinner"></div>
+        Loading 3D View...
+      </div>
+    </div>
+    <div id="results"></div>
+  </div>
+
+  <!-- Right Panel: Analysis History & Info -->
+  <div class="panel">
+    <h3>📊 Current Results</h3>
+    <div id="quickStats"></div>
+
+    <h3>📜 Analysis History</h3>
+    <div id="historyList" style="max-height: 300px; overflow-y: auto;">
+      <p style="color: #78909c; font-size: 0.9em;">No analysis history yet</p>
+    </div>
+    <button id="clearHistoryBtn" class="secondary">🗑️ Clear History</button>
+
+    <h3>ℹ️ Help</h3>
+    <div class="info-box" style="font-size: 0.85em;">
+      <strong>Controls:</strong><br>
+      • 🖱️ Left-click + drag to rotate<br>
+      • 🖱️ Scroll to zoom<br>
+      • Adjust frequency slider for real-time analysis<br>
+      • Select different bodies to compare<br>
+      • Export data in multiple formats
+    </div>
+  </div>
+</main>
+
+<footer>HRAT Enhanced Pro © 2025 | SOLOS Institute | v4.0 Interactive Mode</footer>
+
+<script>
+"use strict";
+
+// ========== CONSTANTS ==========
+const SPEED_OF_LIGHT_M_S = 2.99792458e8;
+const MEASUREMENT_CRITERION = 0.25;
+const DEFAULT_FREQUENCY_STEP = 0.05;
+const SPHERE_SEGMENTS = 32;
+const RING_SEGMENTS = 64;
+const MAX_HISTORY_ITEMS = 10;
+
+// ========== PLANETARY DATA WITH REAL TEXTURES ==========
+const planetaryData = {
+  "Earth": {
+    radius_km: 6371,
+    texture: "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_atmos_2048.jpg",
+    color: 0x4A90E2,
+    boundaries: [
+      {name: "Kármán Line", h_km: 100, f_range: [7, 10]},
+      {name: "Turbopause", h_km: 120, f_range: [7, 10]}
+    ],
+    desc: "Our home planet with magnetosphere and layered atmosphere. The Kármán line marks the boundary between atmosphere and space."
+  },
+  "Venus": {
+    radius_km: 6052,
+    texture: "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/venus_atmosphere.jpg",
+    color: 0xFFD54F,
+    boundaries: [
+      {name: "Exobase", h_km: 200, f_range: [10, 20]}
+    ],
+    desc: "Dense CO₂ atmosphere with extreme greenhouse effect. Surface pressure is 92× Earth's."
+  },
+  "Mars": {
+    radius_km: 3390,
+    texture: "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/mars_1k_color.jpg",
+    color: 0xE57373,
+    boundaries: [
+      {name: "Mesopause", h_km: 100, f_range: [15, 25]}
+    ],
+    desc: "Thin atmosphere (0.6% of Earth's pressure) with ancient hydrologic features and polar ice caps."
+  },
+  "Jupiter": {
+    radius_km: 69911,
+    texture: "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/jupiter_2k.jpg",
+    color: 0xFFB74D,
+    boundaries: [
+      {name: "Tropopause", h_km: 50, f_range: [1, 5]},
+      {name: "Stratopause", h_km: 320, f_range: [1, 5]}
+    ],
+    desc: "Gas giant with the strongest magnetic field of any planet. The Great Red Spot is a storm larger than Earth."
+  },
+  "Moon": {
+    radius_km: 1737,
+    texture: "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/moon_1024.jpg",
+    color: 0xB0B0B0,
+    boundaries: [
+      {name: "Exosphere", h_km: 100, f_range: [50, 100]},
+      {name: "Surface Boundary", h_km: 10, f_range: [50, 100]}
+    ],
+    desc: "Earth's natural satellite with negligible atmosphere (exosphere). Tidal locked rotation period."
+  },
+  "Titan": {
+    radius_km: 2575,
+    color: 0xFFB74D,
+    boundaries: [
+      {name: "Atmopause", h_km: 1000, f_range: [20, 40]},
+      {name: "Ice-Ocean Interface", h_km: 60, f_range: [20, 40]}
+    ],
+    desc: "Saturn's largest moon with nitrogen atmosphere (1.5× Earth's surface pressure) and hydrocarbon lakes."
+  },
+  "Europa": {
+    radius_km: 1561,
+    color: 0xB3E5FC,
+    boundaries: [
+      {name: "Exobase", h_km: 400, f_range: [200, 300]},
+      {name: "Ice-Ocean Interface", h_km: 30, f_range: [200, 300]}
+    ],
+    desc: "Jupiter's moon with subsurface ocean beneath ice crust (100km deep). Strong candidate for extraterrestrial life."
+  },
+  "Ganymede": {
+    radius_km: 2634,
+    color: 0x90CAF9,
+    boundaries: [
+      {name: "Ocean-Mantle Interface", h_km: 250, f_range: [250, 350]},
+      {name: "Ice Shell", h_km: 150, f_range: [250, 350]}
+    ],
+    desc: "Largest moon in solar system with intrinsic magnetic field. Only moon known to have a magnetosphere."
+  },
+  "Enceladus": {
+    radius_km: 252,
+    color: 0xE1F5FE,
+    boundaries: [
+      {name: "Plume Top", h_km: 200, f_range: [200, 300]},
+      {name: "Ice-Ocean Interface", h_km: 25, f_range: [200, 300]}
+    ],
+    desc: "Saturn's moon with active water plumes at south pole. Subsurface ocean detected by Cassini spacecraft."
+  },
+  "Proxima b": {
+    radius_km: 7160,
+    color: 0xF48FB1,
+    boundaries: [
+      {name: "Mesopause", h_km: 90, f_range: [10, 20]}
+    ],
+    desc: "Closest exoplanet in habitable zone (4.2 light-years). Orbits red dwarf Proxima Centauri."
+  },
+  "TRAPPIST-1e": {
+    radius_km: 5800,
+    color: 0xCE93D8,
+    boundaries: [
+      {name: "Kármán-like", h_km: 100, f_range: [10, 20]}
+    ],
+    desc: "Earth-sized exoplanet in habitable zone (39 light-years). One of seven planets in TRAPPIST-1 system."
+  }
+};
+
+// ========== GLOBAL STATE ==========
+let scene, camera, renderer, controls, planetMesh, ringMeshes = [];
+let labelSprites = [];
+let lastAnalysisData = null;
+let textureCache = new Map();
+let analysisHistory = [];
+let currentFrequency = 7.83;
+
+// ========== UTILITY FUNCTIONS ==========
+
+function showMessage(message, type = 'error') {
+  const box = document.getElementById(type === 'success' ? 'successBox' : 'errorBox');
+  box.textContent = message;
+  box.style.display = 'block';
+  setTimeout(() => {
+    box.style.display = 'none';
+  }, 5000);
+}
+
+function showError(message) { showMessage(message, 'error'); }
+function showSuccess(message) { showMessage(message, 'success'); }
+
+function setLoading(isLoading) {
+  document.getElementById("loading").style.display = isLoading ? "block" : "none";
+  document.getElementById("runBtn").disabled = isLoading;
+}
+
+function computeResonanceDelta(altitude_km, frequency_hz) {
+  const altitude_m = altitude_km * 1000;
+  const ratio = SPEED_OF_LIGHT_M_S / (altitude_m * frequency_hz);
+  const fractionalPart = ratio - Math.floor(ratio);
+  const delta = Math.min(fractionalPart, 1 - fractionalPart);
+  return {ratio, delta};
+}
+
+function median(arr) {
+  if (!arr || arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function sensitivitySweep(altitudeList, freqMin, freqMax, step = DEFAULT_FREQUENCY_STEP) {
+  let optimalFreq = freqMin;
+  let minDelta = 1;
+  const altitudes_m = altitudeList.map(h => h * 1000);
+
+  for (let freq = freqMin; freq <= freqMax; freq += step) {
+    const deltas = altitudes_m.map(alt_m => {
+      const ratio = SPEED_OF_LIGHT_M_S / (alt_m * freq);
+      const frac = ratio - Math.floor(ratio);
+      return Math.min(frac, 1 - frac);
+    });
+
+    const medianDelta = median(deltas);
+    if (medianDelta < minDelta) {
+      minDelta = medianDelta;
+      optimalFreq = freq;
+    }
+  }
+
+  return {optimalFreq, minDelta};
+}
+
+// ========== 3D VISUALIZATION ==========
+
+function cleanup3D() {
+  if (renderer) {
+    renderer.dispose();
+    renderer.forceContextLoss();
+  }
+  if (scene) {
+    scene.traverse(obj => {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(mat => mat.dispose());
+        } else {
+          obj.material.dispose();
+        }
+      }
+    });
+    scene.clear();
+  }
+  ringMeshes = [];
+  labelSprites = [];
+}
+
+function createTextSprite(text, color = '#ffffff') {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  canvas.width = 256;
+  canvas.height = 64;
+
+  context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  context.font = 'Bold 24px Arial';
+  context.fillStyle = color;
+  context.textAlign = 'center';
+  context.fillText(text, 128, 40);
+
+  const texture = new THREE.Texture(canvas);
+  texture.needsUpdate = true;
+
+  const material = new THREE.SpriteMaterial({ map: texture });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(2, 0.5, 1);
+
+  return sprite;
+}
+
+function onWindowResize() {
+  if (!camera || !renderer) return;
+  const container = document.getElementById("viewer");
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(width, height);
+}
+
+function init3D(bodyData) {
+  try {
+    setLoading(true);
+    const container = document.getElementById("viewer");
+    container.innerHTML = '<div class="loading" id="loading"><div class="spinner"></div>Loading 3D View...</div>';
+
+    cleanup3D();
+
+    scene = new THREE.Scene();
+    const aspect = container.clientWidth / container.clientHeight;
+    camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
+
+    renderer = new THREE.WebGLRenderer({antialias: true, alpha: true, preserveDrawingBuffer: true});
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    if (typeof THREE.OrbitControls !== 'undefined') {
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.enablePan = false;
+      controls.autoRotate = document.getElementById('autoRotateCheck').checked;
+      controls.autoRotateSpeed = 1.0;
+      controls.minDistance = 1.5;
+      controls.maxDistance = 10;
+    }
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    directionalLight.position.set(5, 5, 5);
+    scene.add(directionalLight);
+    scene.add(new THREE.AmbientLight(0x404040, 0.8));
+
+    // Load texture or use color fallback
+    const geometry = new THREE.SphereGeometry(1, SPHERE_SEGMENTS, SPHERE_SEGMENTS);
+    let material;
+
+    if (bodyData.texture) {
+      const textureLoader = new THREE.TextureLoader();
+      textureLoader.setCrossOrigin('anonymous');
+
+      textureLoader.load(
+        bodyData.texture,
+        (texture) => {
+          planetMesh.material.map = texture;
+          planetMesh.material.needsUpdate = true;
+          showSuccess('Texture loaded successfully!');
+        },
+        undefined,
+        (error) => {
+          console.warn('Texture loading failed, using color fallback:', error);
+        }
+      );
+
+      material = new THREE.MeshStandardMaterial({
+        color: bodyData.color,
+        metalness: 0.2,
+        roughness: 0.7
+      });
+    } else {
+      material = new THREE.MeshStandardMaterial({
+        color: bodyData.color,
+        metalness: 0.2,
+        roughness: 0.8
+      });
+    }
+
+    planetMesh = new THREE.Mesh(geometry, material);
+    scene.add(planetMesh);
+
+    // Create boundary rings
+    ringMeshes = [];
+    labelSprites = [];
+    const showLabels = document.getElementById('showLabelsCheck').checked;
+
+    bodyData.boundaries.forEach((boundary, index) => {
+      const ringRadius = 1 + 0.15 * (index + 1);
+      const ringGeo = new THREE.RingGeometry(
+        ringRadius,
+        ringRadius + 0.02,
+        RING_SEGMENTS
+      );
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: bodyData.color,
+        side: THREE.DoubleSide,
+        opacity: 0.5,
+        transparent: true
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = Math.PI / 2;
+      scene.add(ring);
+      ringMeshes.push(ring);
+
+      // Add label
+      if (showLabels) {
+        const label = createTextSprite(
+          `${boundary.name} (${boundary.h_km}km)`,
+          '#64b5f6'
+        );
+        label.position.set(ringRadius + 0.5, 0, 0);
+        scene.add(label);
+        labelSprites.push(label);
+      }
+    });
+
+    camera.position.set(0, 1, 3);
+
+    function animate() {
+      requestAnimationFrame(animate);
+      if (controls) controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    setLoading(false);
+  } catch (error) {
+    setLoading(false);
+    showError("Failed to initialize 3D view: " + error.message);
+    console.error("3D initialization error:", error);
+  }
+}
+
+// ========== ANALYSIS LOGIC ==========
+
+function runAnalysis(frequency = null) {
+  try {
+    const bodyName = bodySelect.value;
+    const bodyData = planetaryData[bodyName];
+
+    if (!bodyData) {
+      showError("Invalid celestial body selected");
+      return null;
+    }
+
+    const altitudeList = bodyData.boundaries.map(b => b.h_km);
+    const useFreq = frequency || currentFrequency;
+
+    // Calculate results for each boundary
+    const results = bodyData.boundaries.map(boundary => {
+      const {ratio, delta} = computeResonanceDelta(boundary.h_km, useFreq);
+      return {
+        ...boundary,
+        ratio: ratio,
+        delta: delta,
+        optimalHarmonic: Math.round(ratio)
+      };
+    });
+
+    const medianDelta = median(results.map(r => r.delta));
+    const reductionFactor = MEASUREMENT_CRITERION / medianDelta;
+
+    const analysisData = {
+      bodyName: bodyName,
+      bodyData: bodyData,
+      frequency: useFreq,
+      minDelta: medianDelta,
+      measurementCriterion: MEASUREMENT_CRITERION,
+      reductionFactor: reductionFactor,
+      results: results,
+      timestamp: new Date().toISOString()
+    };
+
+    displayResults(analysisData);
+    updateQuickStats(analysisData);
+    addToHistory(analysisData);
+
+    return analysisData;
+  } catch (error) {
+    showError("Analysis failed: " + error.message);
+    console.error("Analysis error:", error);
+    return null;
+  }
+}
+
+function runFullAnalysis() {
+  try {
+    const bodyName = bodySelect.value;
+    const bodyData = planetaryData[bodyName];
+
+    if (!bodyData) {
+      showError("Invalid celestial body selected");
+      return null;
+    }
+
+    const altitudeList = bodyData.boundaries.map(b => b.h_km);
+    const [freqMin, freqMax] = bodyData.boundaries[0].f_range;
+
+    // Perform frequency sweep
+    const sweep = sensitivitySweep(altitudeList, freqMin, freqMax);
+
+    // Update slider to optimal frequency
+    document.getElementById('freqSlider').value = sweep.optimalFreq;
+    currentFrequency = sweep.optimalFreq;
+    document.getElementById('freqValue').textContent = sweep.optimalFreq.toFixed(2) + ' Hz';
+
+    // Run analysis with optimal frequency
+    const analysisData = runAnalysis(sweep.optimalFreq);
+    if (analysisData) {
+      analysisData.optimalFreq = sweep.optimalFreq;
+      init3D(bodyData);
+      showSuccess(`Optimal frequency found: ${sweep.optimalFreq.toFixed(2)} Hz`);
+    }
+
+    return analysisData;
+  } catch (error) {
+    showError("Full analysis failed: " + error.message);
+    console.error("Full analysis error:", error);
+    return null;
+  }
+}
+
+function updateQuickStats(data) {
+  const quickStats = document.getElementById('quickStats');
+  quickStats.innerHTML = `
+    <div class='stat-grid'>
+      <div class='stat-card'>
+        <div class='stat-label'>Frequency</div>
+        <div class='stat-value'>${data.frequency.toFixed(2)}</div>
+        <div style='font-size:0.7em;color:#78909c;'>Hz</div>
+      </div>
+      <div class='stat-card'>
+        <div class='stat-label'>Median δ</div>
+        <div class='stat-value'>${data.minDelta.toFixed(4)}</div>
+      </div>
+      <div class='stat-card'>
+        <div class='stat-label'>Reduction</div>
+        <div class='stat-value'>${data.reductionFactor.toFixed(1)}×</div>
+      </div>
+    </div>
+  `;
+}
+
+function displayResults(data) {
+  const resultsContainer = document.getElementById("results");
+  const infoBox = document.getElementById("infoBox");
+
+  infoBox.innerHTML = `<strong>${data.bodyData.desc}</strong>`;
+
+  const htmlParts = [
+    `<h3>${data.bodyName} - Detailed Results</h3>`,
+    `<table><thead><tr><th>Boundary</th><th>Alt (km)</th><th>n</th><th>δ</th><th>Quality</th></tr></thead><tbody>`
+  ];
+
+  data.results.forEach(boundary => {
+    const quality = boundary.delta < 0.1 ? '🟢 Excellent' :
+                    boundary.delta < 0.2 ? '🟡 Good' : '🔴 Poor';
+    htmlParts.push(
+      `<tr>
+        <td>${boundary.name}</td>
+        <td>${boundary.h_km}</td>
+        <td>${boundary.optimalHarmonic}</td>
+        <td>${boundary.delta.toFixed(6)}</td>
+        <td>${quality}</td>
+      </tr>`
+    );
+  });
+
+  htmlParts.push("</tbody></table>");
+  resultsContainer.innerHTML = htmlParts.join('');
+}
+
+// ========== HISTORY MANAGEMENT ==========
+
+function addToHistory(data) {
+  const historyItem = {
+    bodyName: data.bodyName,
+    frequency: data.frequency,
+    minDelta: data.minDelta,
+    timestamp: data.timestamp,
+    data: data
+  };
+
+  analysisHistory.unshift(historyItem);
+  if (analysisHistory.length > MAX_HISTORY_ITEMS) {
+    analysisHistory.pop();
+  }
+
+  updateHistoryDisplay();
+  saveHistoryToStorage();
+}
+
+function updateHistoryDisplay() {
+  const historyList = document.getElementById('historyList');
+
+  if (analysisHistory.length === 0) {
+    historyList.innerHTML = '<p style="color: #78909c; font-size: 0.9em;">No analysis history yet</p>';
+    return;
+  }
+
+  const html = analysisHistory.map((item, index) => {
+    const date = new Date(item.timestamp);
+    const timeStr = date.toLocaleTimeString();
+    return `
+      <div class="history-item" onclick="loadHistoryItem(${index})">
+        <strong>${item.bodyName}</strong> @ ${item.frequency.toFixed(2)} Hz<br>
+        <small>${timeStr} • δ=${item.minDelta.toFixed(4)}</small>
+      </div>
+    `;
+  }).join('');
+
+  historyList.innerHTML = html;
+}
+
+function loadHistoryItem(index) {
+  const item = analysisHistory[index];
+  if (item && item.data) {
+    bodySelect.value = item.bodyName;
+    currentFrequency = item.frequency;
+    document.getElementById('freqSlider').value = item.frequency;
+    document.getElementById('freqValue').textContent = item.frequency.toFixed(2) + ' Hz';
+    lastAnalysisData = item.data;
+    displayResults(item.data);
+    updateQuickStats(item.data);
+    init3D(item.data.bodyData);
+    showSuccess('Loaded from history');
+  }
+}
+
+function clearHistory() {
+  if (confirm('Clear all analysis history?')) {
+    analysisHistory = [];
+    updateHistoryDisplay();
+    localStorage.removeItem('hrat_history');
+    showSuccess('History cleared');
+  }
+}
+
+function saveHistoryToStorage() {
+  try {
+    localStorage.setItem('hrat_history', JSON.stringify(analysisHistory));
+  } catch (e) {
+    console.warn('Failed to save history to localStorage:', e);
+  }
+}
+
+function loadHistoryFromStorage() {
+  try {
+    const stored = localStorage.getItem('hrat_history');
+    if (stored) {
+      analysisHistory = JSON.parse(stored);
+      updateHistoryDisplay();
+    }
+  } catch (e) {
+    console.warn('Failed to load history from localStorage:', e);
+  }
+}
+
+// ========== EXPORT FUNCTIONS ==========
+
+function exportCSV(data) {
+  if (!data) {
+    showError("No analysis data to export");
+    return;
+  }
+
+  try {
+    const rows = [
+      ["Boundary", "Altitude(km)", "n_opt", "delta", "ratio"],
+      ...data.results.map(b => [b.name, b.h_km, b.optimalHarmonic, b.delta.toFixed(6), b.ratio.toFixed(3)])
+    ];
+
+    const csv = rows.map(row => row.join(',')).join('\n');
+    const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${data.bodyName}_HRAT_${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    showSuccess('CSV exported successfully');
+  } catch (error) {
+    showError("CSV export failed: " + error.message);
+  }
+}
+
+function exportJSON(data) {
+  if (!data) {
+    showError("No analysis data to export");
+    return;
+  }
+
+  try {
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], {type: "application/json;charset=utf-8;"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${data.bodyName}_HRAT_${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    showSuccess('JSON exported successfully');
+  } catch (error) {
+    showError("JSON export failed: " + error.message);
+  }
+}
+
+function exportPDF(data) {
+  if (!data) {
+    showError("No analysis data to export");
+    return;
+  }
+
+  try {
+    const {jsPDF} = window.jspdf;
+    const doc = new jsPDF();
+
+    doc.setFontSize(16);
+    doc.text(`HRAT Enhanced Pro v4.0 Report`, 10, 20);
+
+    doc.setFontSize(12);
+    doc.text(`Celestial Body: ${data.bodyName}`, 10, 35);
+    doc.text(`Analysis Frequency: ${data.frequency.toFixed(2)} Hz`, 10, 42);
+    doc.text(`Median Delta: ${data.minDelta.toFixed(6)}`, 10, 49);
+    doc.text(`Reduction Factor: ${data.reductionFactor.toFixed(1)}x`, 10, 56);
+    doc.text(`Generated: ${new Date(data.timestamp).toLocaleString()}`, 10, 63);
+
+    doc.setFontSize(10);
+    let y = 75;
+    doc.text("Boundary Analysis Results:", 10, y);
+    y += 7;
+
+    data.results.forEach(boundary => {
+      const line = `${boundary.name.padEnd(25)} ${String(boundary.h_km).padStart(6)} km  n=${String(boundary.optimalHarmonic).padStart(4)}  δ=${boundary.delta.toFixed(6)}`;
+      doc.text(line, 10, y);
+      y += 6;
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
+      }
+    });
+
+    y += 10;
+    doc.setFontSize(8);
+    doc.text('Description: ' + data.bodyData.desc, 10, y, { maxWidth: 180 });
+
+    doc.save(`${data.bodyName}_HRAT_${Date.now()}.pdf`);
+    showSuccess('PDF exported successfully');
+  } catch (error) {
+    showError("PDF export failed: " + error.message);
+  }
+}
+
+function takeScreenshot() {
+  try {
+    if (!renderer) {
+      showError("3D view not initialized");
+      return;
+    }
+
+    renderer.render(scene, camera);
+    const imgData = renderer.domElement.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.href = imgData;
+    link.download = `HRAT_3D_${Date.now()}.png`;
+    link.click();
+    showSuccess('Screenshot saved!');
+  } catch (error) {
+    showError("Screenshot failed: " + error.message);
+  }
+}
+
+// ========== INITIALIZATION ==========
+
+function initializeUI() {
+  const bodySelect = document.getElementById("bodySelect");
+  Object.keys(planetaryData).forEach(bodyName => {
+    const option = document.createElement("option");
+    option.value = bodyName;
+    option.textContent = bodyName;
+    bodySelect.appendChild(option);
+  });
+}
+
+function setupEventListeners() {
+  // Analysis controls
+  document.getElementById("runBtn").onclick = () => {
+    lastAnalysisData = runFullAnalysis();
+  };
+
+  document.getElementById("autoOptimizeBtn").onclick = () => {
+    lastAnalysisData = runFullAnalysis();
+  };
+
+  // Frequency slider
+  const freqSlider = document.getElementById('freqSlider');
+  const freqValue = document.getElementById('freqValue');
+
+  freqSlider.oninput = () => {
+    currentFrequency = parseFloat(freqSlider.value);
+    freqValue.textContent = currentFrequency.toFixed(2) + ' Hz';
+  };
+
+  freqSlider.onchange = () => {
+    lastAnalysisData = runAnalysis(currentFrequency);
+  };
+
+  // Body selection
+  bodySelect.onchange = () => {
+    const bodyData = planetaryData[bodySelect.value];
+    const [fMin, fMax] = bodyData.boundaries[0].f_range;
+    const midFreq = (fMin + fMax) / 2;
+
+    freqSlider.min = fMin;
+    freqSlider.max = fMax;
+    freqSlider.value = midFreq;
+    currentFrequency = midFreq;
+    freqValue.textContent = midFreq.toFixed(2) + ' Hz';
+
+    lastAnalysisData = runAnalysis(currentFrequency);
+    init3D(bodyData);
+  };
+
+  // 3D controls
+  document.getElementById('autoRotateCheck').onchange = (e) => {
+    if (controls) controls.autoRotate = e.target.checked;
+  };
+
+  document.getElementById('showLabelsCheck').onchange = () => {
+    const bodyData = planetaryData[bodySelect.value];
+    init3D(bodyData);
+  };
+
+  // Export controls
+  document.getElementById("csvBtn").onclick = () => exportCSV(lastAnalysisData);
+  document.getElementById("jsonBtn").onclick = () => exportJSON(lastAnalysisData);
+  document.getElementById("pdfBtn").onclick = () => exportPDF(lastAnalysisData);
+  document.getElementById("screenshotBtn").onclick = takeScreenshot;
+
+  // History
+  document.getElementById("clearHistoryBtn").onclick = clearHistory;
+
+  // Window resize
+  window.addEventListener('resize', onWindowResize);
+
+  // Cleanup on unload
+  window.addEventListener('beforeunload', () => {
+    cleanup3D();
+  });
+}
+
+// Make loadHistoryItem global
+window.loadHistoryItem = loadHistoryItem;
+
+// ========== APPLICATION ENTRY POINT ==========
+window.addEventListener("load", () => {
+  try {
+    initializeUI();
+    setupEventListeners();
+    loadHistoryFromStorage();
+
+    // Run initial analysis for Earth
+    bodySelect.value = "Earth";
+    lastAnalysisData = runFullAnalysis();
+  } catch (error) {
+    showError("Application initialization failed: " + error.message);
+    console.error("Initialization error:", error);
+  }
+});
+</script>
+</body>
+</html>
