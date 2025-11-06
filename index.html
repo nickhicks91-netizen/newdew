@@ -471,6 +471,14 @@ window.onload = function() {
         directionalLight2.position.set(-5, -5, -5);
         scene.add(directionalLight2);
 
+        // Add test sphere to verify rendering works
+        const testGeo = new THREE.SphereGeometry(0.5, 32, 32);
+        const testMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+        const testSphere = new THREE.Mesh(testGeo, testMat);
+        testSphere.position.set(0, 0, 0);
+        scene.add(testSphere);
+        console.log('Added red test sphere at origin');
+
         // Initialize cross-section plane
         crossSectionCanvas = document.createElement('canvas');
         crossSectionCanvas.width = 50; // Match grid size
@@ -562,6 +570,15 @@ window.onload = function() {
 
         controls.update();
         renderer.render(scene, camera);
+
+        // Debug: log first frame
+        if (typeof updateGraphics.frameCount === 'undefined') {
+            updateGraphics.frameCount = 0;
+        }
+        updateGraphics.frameCount++;
+        if (updateGraphics.frameCount === 1) {
+            console.log('First frame rendered, renderer info:', renderer.info.render);
+        }
     }
 
     function updateTelemetry(data) {
@@ -748,11 +765,18 @@ window.onload = function() {
 
             color.copy(quadrants[quadIdx].color);
             nodeMesh.setColorAt(i, color);
+
+            if (i === 0) {
+                console.log('Vertex 0 position:', scaledPos, 'quadrant:', quadIdx, 'color:', color.getHexString());
+            }
         }
         nodeMesh.instanceMatrix.needsUpdate = true;
         nodeMesh.instanceColor.needsUpdate = true;
+        console.log('Mesh bounding sphere radius:', nodeMesh.geometry.boundingSphere?.radius);
+        console.log('Material type:', nodeMesh.material.type, 'vertexColors:', nodeMesh.material.vertexColors);
 
         scene.add(nodeMesh);
+        console.log('Total scene children:', scene.children.length);
         if (telemetryChart) telemetryChart.destroy();
         initChart();
         lastUpdateTime = Date.now();
