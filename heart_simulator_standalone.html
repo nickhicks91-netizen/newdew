@@ -1,75 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-<!--
-═══════════════════════════════════════════════════════════════════════════════
-  INTERACTIVE 3D HEART SIMULATOR - BIOHYBRID DIGITAL TWIN (TRL 5)
-═══════════════════════════════════════════════════════════════════════════════
-
-  🚀 HOW TO USE:
-
-  1. DOWNLOAD this file to your computer
-  2. OPEN it in any modern web browser:
-     - Google Chrome (recommended)
-     - Firefox
-     - Edge
-     - Safari
-
-  3. NO SERVER NEEDED! This file works offline once downloaded.
-     (Requires internet connection ONLY for loading external libraries on first open)
-
-  📊 FEATURES:
-
-  ✓ Interactive 3D heart model (tetrahedral arrangement of icosahedrons, 4 chambers)
-  ✓ Aliev-Panfilov electrophysiology model
-  ✓ Kuramoto phase synchronization with RSA modulation
-  ✓ Real-time telemetry (ECG, GCI, PLV, energy, winding number, EF proxy, spiral detection)
-  ✓ Baroreflex control for autonomous blood pressure regulation
-  ✓ BiVACOR benchmark validation
-  ✓ Phantom Flow Mode for hardware simulation
-  ✓ CSV export for actuator control systems
-
-  🎮 CONTROLS:
-
-  - Heart Rate: 40-180 BPM
-  - RSA Drive: 0-1
-  - Noise Level: 0-0.3
-  - Coupling (K): 0-5
-  - Torsion (κ): 0-1
-  - SVR (Systemic Vascular Resistance): 800-1600
-  - Baroreflex: Autonomous MAP regulation at 90 mmHg
-  - BiVACOR Validation: Real-time comparison with clinical device
-  - Phantom Flow Mode: Per-chamber flow field computation
-  - Stimulate Chamber: Induce excitation in a chamber
-  - Export: Download CSV data for hardware actuators
-  - Presets: Normal, Tachycardia, Bradycardia, Arrhythmia
-
-  🔬 TECHNICAL DETAILS:
-
-  Model: Tetrahedral arrangement of 4 icosahedrons (one per chamber)
-  Physics: Aliev-Panfilov with RK4 integration, Kuramoto oscillators for sync
-  Chambers: RA (Right Atrium), LA (Left Atrium), RV (Right Ventricle), LV (Left Ventricle)
-  Pacemaker: SA node simulation in RA
-
-  📦 DEPENDENCIES (loaded from CDN):
-
-  - Three.js v0.158.0 (3D graphics)
-  - Chart.js v4.4.1 (telemetry graphs)
-  - Tailwind CSS (styling)
-
-  💾 FILE SIZE: ~35KB (standalone, portable)
-
-  🎯 BROWSER REQUIREMENTS:
-
-  - Modern browser with WebGL support
-  - JavaScript enabled
-  - Canvas and WebGL APIs
-
-  📝 VERSION: Phase 2 - Biohybrid Control with Harmonic Enhancements
-  🏷️  TRL: Technology Readiness Level 5
-  📅 UPDATED: 2025-11-06
-
-═══════════════════════════════════════════════════════════════════════════════
--->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -149,12 +79,25 @@
                     <span class="font-medium text-gray-300">Phantom Flow Mode</span>
                     <label class="switch"><input type="checkbox" id="phantomModeToggle"><span class="slider"></span></label>
                 </div>
-                <div class="flex justify-between items-center mt-2">
+                <select id="stimulateChamberSelect" class="w-full mt-2 bg-gray-700 text-white p-2 rounded-lg">
+                    <option value="LA">LA (Left Atrium)</option>
+                    <option value="RA">RA (Right Atrium)</option>
+                    <option value="LV">LV (Left Ventricle)</option>
+                    <option value="RV">RV (Right Ventricle)</option>
+                </select>
+                <button id="stimulateButton" class="w-full mt-2 bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">⚡ Stimulate Chamber</button>
+                <button id="exportButton" class="w-full mt-2 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Export for Actuator</button>
+            </div>
+            <div class="border-t border-gray-700 pt-4 mt-4">
+                <h3 class="text-lg font-bold text-center text-blue-400 mb-2">Visualizations</h3>
+                <div class="flex justify-between items-center">
                     <span class="font-medium text-gray-300">Cross-Section View</span>
                     <label class="switch"><input type="checkbox" id="crossSectionToggle"><span class="slider"></span></label>
                 </div>
-                <button id="stimulateButton" class="w-full mt-4 bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">⚡ Stimulate Chamber</button>
-                <button id="exportButton" class="w-full mt-2 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Export for Actuator</button>
+                <div class="flex justify-between items-center mt-2">
+                    <span class="font-medium text-gray-300">Chamber Colors</span>
+                    <label class="switch"><input type="checkbox" id="colorToggle" checked><span class="slider"></span></label>
+                </div>
             </div>
             <div class="flex items-center gap-4">
                 <button id="playPauseButton" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Pause</button>
@@ -238,11 +181,12 @@ window.onload = function() {
     const canvasContainer = document.getElementById('canvasContainer');
     let scene, camera, renderer, controls, nodeMesh, telemetryChart, phantomFlowField;
     let crossSectionPlane, crossSectionTexture, crossSectionCanvas, crossSectionCtx, isCrossSection = false;
+    let isColorCoded = true;
     let animationFrameId, lastUpdateTime = 0;
     let isPaused = false, isPhantomMode = false, isValidateMode = false, isBaroreflexOn = true;
     let exportBuffer = [];
     let model, sync;
-    let baseHR = 60; // Store base HR separately from displayed HR
+    let baseHR = 60;
 
     const dom = {
         hrSlider: document.getElementById('hrSlider'),
@@ -255,9 +199,11 @@ window.onload = function() {
         validateToggle: document.getElementById('validateToggle'),
         validationDisplay: document.getElementById('validation-display'),
         phantomModeToggle: document.getElementById('phantomModeToggle'),
-        crossSectionToggle: document.getElementById('crossSectionToggle'),
+        stimulateChamberSelect: document.getElementById('stimulateChamberSelect'),
         stimulateButton: document.getElementById('stimulateButton'),
         exportButton: document.getElementById('exportButton'),
+        crossSectionToggle: document.getElementById('crossSectionToggle'),
+        colorToggle: document.getElementById('colorToggle'),
         playPauseButton: document.getElementById('playPauseButton'),
         resetButton: document.getElementById('resetButton'),
         hrValue: document.getElementById('hrValue'),
@@ -306,7 +252,6 @@ window.onload = function() {
         return { vertices, faces };
     }
 
-    // Aliev-Panfilov Model Class (single unified model with quadrant support)
     class AlievPanfilov {
       constructor(size = 50, dt = 0.01) {
         this.size = size;
@@ -356,7 +301,6 @@ window.onload = function() {
       }
       getAverageU() { return this.u.reduce((sum, val) => sum + val, 0) / this.n; }
       getQuadrantAverage(quadrant) {
-        // Divide grid into 4 quadrants for chambers (LA, RA, LV, RV)
         const quadSize = Math.floor(this.size / 2);
         let sum = 0, count = 0;
         const startI = (quadrant.row === 0) ? 0 : quadSize;
@@ -370,21 +314,20 @@ window.onload = function() {
         return sum / count;
       }
       getShearProxy() {
-        // Simplified shear stress proxy based on potential gradients
         let shear = 0;
         for (let i = 1; i < this.size - 1; i++) {
-          for (let j = 1; j < this.size - 1; j++) {
-            const idx = this.idx(i, j);
-            const gradX = (this.u[this.idx(i+1, j)] - this.u[this.idx(i-1, j)]) / (2 * this.dx);
-            const gradY = (this.u[this.idx(i, j+1)] - this.u[this.idx(i, j-1)]) / (2 * this.dx);
-            shear += Math.sqrt(gradX**2 + gradY**2);
-          }
+            for (let j = 1; j < this.size - 1; j++) {
+                const idx = this.idx(i, j);
+                const gradX = (this.u[this.idx(i+1, j)] - this.u[this.idx(i-1, j)]) / (2 * this.dx);
+                const gradY = (this.u[this.idx(i, j+1)] - this.u[this.idx(i, j-1)]) / (2 * this.dx);
+                shear += Math.sqrt(gradX**2 + gradY**2);
+            }
         }
-        return (shear / (this.n)) * 150; // Scaled to Pa range (0-150)
+        return (shear / (this.n)) * 150;
       }
       getHemolysisIndex() {
         const shear = this.getShearProxy();
-        return 0.01 * Math.pow(shear / 100, 1.8); // Empirical formula proxy
+        return 0.01 * Math.pow(shear / 100, 1.8);
       }
       detectSpiralWaves() {
         let spiralScore = 0;
@@ -400,20 +343,20 @@ window.onload = function() {
         }
         return spiralScore / 8;
       }
-      stimulate(radius = 10, strength = 0.9) {
-        const x = Math.floor(this.size / 2);
-        const y = Math.floor(this.size / 2);
+      stimulate(quadrant, radius = 10, strength = 0.9) {
+        const quadSize = Math.floor(this.size / 2);
+        const centerI = Math.floor(quadrant.row === 0 ? quadSize / 2 : quadSize + quadSize / 2);
+        const centerJ = Math.floor(quadrant.col === 0 ? quadSize / 2 : quadSize + quadSize / 2);
         for (let i = 0; i < this.size; i++) {
           for (let j = 0; j < this.size; j++) {
-            if (Math.sqrt((i - x) ** 2 + (j - y) ** 2) < radius) {
-              this.u[this.idx(i, j)] = strength;
+            if (Math.sqrt((i - centerI) ** 2 + (j - centerJ) ** 2) < radius) {
+                this.u[this.idx(i, j)] = strength;
             }
           }
         }
       }
     }
 
-    // Kuramoto Synchronization
     class KuramotoSync {
       constructor(numChambers = 4, K = 1.0) {
         this.theta = Array(numChambers).fill(0);
@@ -452,7 +395,7 @@ window.onload = function() {
 
     function initGraphics() {
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a2e); // Dark blue background instead of black
+        scene.background = new THREE.Color(0x1a1a2e);
         camera = new THREE.PerspectiveCamera(75, canvasContainer.clientWidth / canvasContainer.clientHeight, 0.1, 1000);
         camera.position.set(0, 0, 5);
         renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -461,7 +404,6 @@ window.onload = function() {
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
-        // Enhanced lighting
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
         scene.add(ambientLight);
         const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -471,27 +413,20 @@ window.onload = function() {
         directionalLight2.position.set(-5, -5, -5);
         scene.add(directionalLight2);
 
-        // Add test sphere to verify rendering works
-        const testGeo = new THREE.SphereGeometry(0.5, 32, 32);
-        const testMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-        const testSphere = new THREE.Mesh(testGeo, testMat);
-        testSphere.position.set(0, 0, 0);
-        scene.add(testSphere);
-        console.log('Added red test sphere at origin');
-
-        // Initialize cross-section plane
         crossSectionCanvas = document.createElement('canvas');
-        crossSectionCanvas.width = 50; // Match grid size
+        crossSectionCanvas.width = 50;
         crossSectionCanvas.height = 50;
         crossSectionCtx = crossSectionCanvas.getContext('2d');
         crossSectionTexture = new THREE.CanvasTexture(crossSectionCanvas);
-        const planeGeo = new THREE.PlaneGeometry(1.2, 1.2); // Size to fit chamber
+        const planeGeo = new THREE.PlaneGeometry(1.2, 1.2);
         const planeMat = new THREE.MeshBasicMaterial({ map: crossSectionTexture, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
         crossSectionPlane = new THREE.Mesh(planeGeo, planeMat);
-        crossSectionPlane.position.set(1.5, -1.5, 0); // Position in LV
-        crossSectionPlane.rotation.set(0, Math.PI / 2, 0); // Rotate for cross-section
+        crossSectionPlane.position.set(0, 0, 0);
+        crossSectionPlane.rotation.set(0, Math.PI / 2, 0);
         crossSectionPlane.visible = false;
         scene.add(crossSectionPlane);
+
+        console.log('Graphics initialized, scene has', scene.children.length, 'children');
     }
 
     function initChart() {
@@ -519,9 +454,7 @@ window.onload = function() {
             {row: 1, col: 1, color: ChamberColors.RV}
         ];
 
-        // Update instanced mesh vertices
         for (let i = 0; i < geo.vertices.length; i++) {
-            // Assign vertex to quadrant based on position (by coordinate signs)
             let quadIdx = 0;
             if (geo.vertices[i][0] > 0) quadIdx += 1;
             if (geo.vertices[i][1] < 0) quadIdx += 2;
@@ -530,35 +463,36 @@ window.onload = function() {
             const phase = sync.getPhase(quadIdx);
             const pulsation = 1 + 0.2 * Math.sin(phase) * (1 + 0.5 * avgU);
 
-            // Scale vertices to make them visible (icosahedron normalized to unit sphere)
-            const scaledPos = geo.vertices[i].map(v => v * 2.0); // Scale up by 2x
+            const scaledPos = geo.vertices[i].map(v => v * 2.0);
             dummy.position.fromArray(scaledPos);
             dummy.scale.set(pulsation, pulsation, pulsation);
             dummy.updateMatrix();
             nodeMesh.setMatrixAt(i, dummy.matrix);
 
-            color.copy(quadrants[quadIdx].color).lerp(new THREE.Color(1,1,1), avgU * 0.5);
+            if (isColorCoded) {
+                color.copy(quadrants[quadIdx].color).lerp(new THREE.Color(1,1,1), avgU * 0.5);
+            } else {
+                color.set(0xaaaaaa);
+            }
             nodeMesh.setColorAt(i, color);
         }
         nodeMesh.instanceMatrix.needsUpdate = true;
         nodeMesh.instanceColor.needsUpdate = true;
 
-        // Update cross-section view
         if (isCrossSection) {
-            // Update canvas with u field from unified model
             const u = model.u;
             const imageData = crossSectionCtx.createImageData(50, 50);
             for (let i = 0; i < 50; i++) {
                 for (let j = 0; j < 50; j++) {
                     const val = u[i * 50 + j];
                     const idx = (i * 50 + j) * 4;
-                    const r = Math.floor(255 * val); // Red for high potential
+                    const r = Math.floor(255 * val);
                     const g = 0;
-                    const b = Math.floor(255 * (1 - val)); // Blue for low
+                    const b = Math.floor(255 * (1 - val));
                     imageData.data[idx] = r;
                     imageData.data[idx + 1] = g;
                     imageData.data[idx + 2] = b;
-                    imageData.data[idx + 3] = 255; // Alpha
+                    imageData.data[idx + 3] = 255;
                 }
             }
             crossSectionCtx.putImageData(imageData, 0, 0);
@@ -570,15 +504,6 @@ window.onload = function() {
 
         controls.update();
         renderer.render(scene, camera);
-
-        // Debug: log first frame
-        if (typeof updateGraphics.frameCount === 'undefined') {
-            updateGraphics.frameCount = 0;
-        }
-        updateGraphics.frameCount++;
-        if (updateGraphics.frameCount === 1) {
-            console.log('First frame rendered, renderer info:', renderer.info.render);
-        }
     }
 
     function updateTelemetry(data) {
@@ -606,7 +531,6 @@ window.onload = function() {
         exportBuffer.push(data);
         if(exportBuffer.length > 500) exportBuffer.shift();
 
-        // BiVACOR validation
         if (isValidateMode) {
             const currentHR = data.hr;
             let nearestIdx = 0;
@@ -627,7 +551,6 @@ window.onload = function() {
             dom.validationDisplay.classList.add('hidden');
         }
 
-        // Phantom flow field
         if (isPhantomMode) {
             const quadrants = [{row: 0, col: 0}, {row: 0, col: 1}, {row: 1, col: 0}, {row: 1, col: 1}];
             phantomFlowField = {
@@ -654,22 +577,18 @@ window.onload = function() {
         if (elapsed > SimConfig.dt) {
             lastUpdateTime = now;
             model.step(SimConfig.noise);
-
-            // Use baseHR for Kuramoto, which can be modulated by baroreflex
             sync.step(SimConfig.dt, SimConfig.rsa, baseHR);
 
             const quadrants = [{row: 0, col: 0}, {row: 0, col: 1}, {row: 1, col: 0}, {row: 1, col: 1}];
             const avgU = model.getAverageU();
             const quadAvgs = quadrants.map(q => model.getQuadrantAverage(q));
-
-            // ECG from weighted sum of chamber potentials (ventricles weighted more)
             const ecg = quadAvgs[0] * 0.3 * Math.cos(sync.getPhase(0)) +
                         quadAvgs[1] * 0.3 * Math.cos(sync.getPhase(1)) +
                         quadAvgs[2] * 0.7 * Math.cos(sync.getPhase(2)) +
                         quadAvgs[3] * 0.7 * Math.cos(sync.getPhase(3));
 
             const gci = sync.getGCI();
-            const plv = sync.getPLV(0, 2); // LA-LV phase locking
+            const plv = sync.getPLV(0, 2);
             const energy = sync.getEnergy();
             const winding = Math.round(SimConfig.kappa * sync.getPhase(0) / (2 * Math.PI)) % 2;
             const ejectionFraction = 0.55 + 0.15 * gci;
@@ -682,7 +601,6 @@ window.onload = function() {
             const co = baseHR * sv / 1000;
             let map = co * SimConfig.svr / 80;
 
-            // Baroreflex adjusts baseHR, not the slider
             if (isBaroreflexOn) {
                 const map_error = SimConfig.target_map - map;
                 const baro_adjust = map_error * 0.5;
@@ -735,14 +653,10 @@ window.onload = function() {
         if (nodeMesh) scene.remove(nodeMesh);
 
         const geo = icosahedronGeometry();
-        console.log('Icosahedron has', geo.vertices.length, 'vertices');
-
         const sphereGeo = new THREE.SphereGeometry(0.2, 16, 12);
         const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
         nodeMesh = new THREE.InstancedMesh(sphereGeo, mat, geo.vertices.length);
-        console.log('Created instanced mesh with', geo.vertices.length, 'instances');
 
-        // Initialize positions and colors for each vertex
         const dummy = new THREE.Object3D();
         const color = new THREE.Color();
         const quadrants = [
@@ -765,44 +679,39 @@ window.onload = function() {
 
             color.copy(quadrants[quadIdx].color);
             nodeMesh.setColorAt(i, color);
-
-            if (i === 0) {
-                console.log('Vertex 0 position:', scaledPos, 'quadrant:', quadIdx, 'color:', color.getHexString());
-            }
         }
         nodeMesh.instanceMatrix.needsUpdate = true;
         nodeMesh.instanceColor.needsUpdate = true;
-        console.log('Mesh bounding sphere radius:', nodeMesh.geometry.boundingSphere?.radius);
-        console.log('Material type:', nodeMesh.material.type, 'vertexColors:', nodeMesh.material.vertexColors);
 
         scene.add(nodeMesh);
-        console.log('Total scene children:', scene.children.length);
+        console.log('Setup complete: nodeMesh has', geo.vertices.length, 'instances');
+
         if (telemetryChart) telemetryChart.destroy();
         initChart();
         lastUpdateTime = Date.now();
         isPaused = false;
         dom.playPauseButton.textContent = "Pause";
 
-        // Render initial frame
         updateGraphics();
 
         if (!animationFrameId) animationFrameId = requestAnimationFrame(mainLoop);
     }
 
-    // Event listeners
     [dom.hrSlider, dom.rsaSlider, dom.noiseSlider, dom.kSlider, dom.kappaSlider, dom.svrSlider].forEach(el => el.addEventListener('input', updateSliderValues));
     [dom.hrSlider, dom.rsaSlider, dom.noiseSlider, dom.kSlider, dom.kappaSlider, dom.svrSlider].forEach(el => el.addEventListener('change', setup));
     dom.baroreflexToggle.addEventListener('change', () => {
         isBaroreflexOn = dom.baroreflexToggle.checked;
         if (!isBaroreflexOn) {
-            // Reset to slider value when turning off baroreflex
             baseHR = parseFloat(dom.hrSlider.value);
         }
     });
     dom.validateToggle.addEventListener('change', () => isValidateMode = dom.validateToggle.checked);
     dom.phantomModeToggle.addEventListener('change', () => isPhantomMode = dom.phantomModeToggle.checked);
-    dom.crossSectionToggle.addEventListener('change', () => isCrossSection = dom.crossSectionToggle.checked);
-    dom.stimulateButton.addEventListener('click', () => model.stimulate());
+    dom.stimulateButton.addEventListener('click', () => {
+        const selected = dom.stimulateChamberSelect.value;
+        const quadrants = { LA: {row: 0, col: 0}, RA: {row: 0, col: 1}, LV: {row: 1, col: 0}, RV: {row: 1, col: 1} };
+        model.stimulate(quadrants[selected]);
+    });
     dom.exportButton.addEventListener('click', () => {
         if (exportBuffer.length === 0) return alert('No data to export.');
         let csv = 'Time,HR,CO,Sys,Dias,GCI,PLV,Energy,Winding,EF,Spiral,ECG,AvgU,Shear,Hemolysis\n';
@@ -817,13 +726,14 @@ window.onload = function() {
         a.href = url; a.download = `heart_data_${Date.now()}.csv`; a.click();
         URL.revokeObjectURL(url);
     });
+    dom.crossSectionToggle.addEventListener('change', () => isCrossSection = dom.crossSectionToggle.checked);
+    dom.colorToggle.addEventListener('change', () => isColorCoded = dom.colorToggle.checked);
     dom.playPauseButton.addEventListener('click', () => {
         isPaused = !isPaused;
         dom.playPauseButton.textContent = isPaused ? 'Play' : 'Pause';
     });
     dom.resetButton.addEventListener('click', setup);
 
-    // Verify canvasContainer exists
     if (!canvasContainer) {
         console.error('Canvas container not found!');
         return;
@@ -833,16 +743,9 @@ window.onload = function() {
     console.log('Canvas container size:', canvasContainer.clientWidth, 'x', canvasContainer.clientHeight);
 
     initGraphics();
-    console.log('Graphics initialized');
-
     initChart();
-    console.log('Chart initialized');
-
     window.applyPreset('normal');
-    console.log('Preset applied');
-
     setup();
-    console.log('Setup complete, scene should be visible');
 
     new ResizeObserver(() => {
         renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
