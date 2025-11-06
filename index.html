@@ -118,6 +118,10 @@
                     <span class="font-medium text-gray-300">Heart Valves Viz</span>
                     <label class="switch"><input type="checkbox" id="valvesToggle"><span class="slider"></span></label>
                 </div>
+                <div class="flex justify-between items-center mt-2">
+                    <span class="font-medium text-gray-300">Valve Interactions</span>
+                    <label class="switch"><input type="checkbox" id="valveInteractToggle"><span class="slider"></span></label>
+                </div>
             </div>
             <div class="flex items-center gap-4">
                 <button id="playPauseButton" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Pause</button>
@@ -210,7 +214,7 @@ window.onload = function() {
     let isBloodFlow = false;
     let isCfd = false, cfdPlane, cfdVelocityTexture, cfdPressureTexture, cfdRendererTargetA, cfdRendererTargetB;
     let cfdAdvectionMaterial, cfdDiffusionMaterial, cfdProjectionMaterial, cfdDisplayMaterial;
-    let isValvesViz = false, valveMeshes = [];
+    let isValvesViz = false, isValveInteract = false, valveMeshes = [];
     let animationFrameId, lastUpdateTime = 0;
     let isPaused = false, isPhantomMode = false, isValidateMode = false, isBaroreflexOn = true;
     let exportBuffer = [];
@@ -238,6 +242,7 @@ window.onload = function() {
         bloodFlowToggle: document.getElementById('bloodFlowToggle'),
         cfdToggle: document.getElementById('cfdToggle'),
         valvesToggle: document.getElementById('valvesToggle'),
+        valveInteractToggle: document.getElementById('valveInteractToggle'),
         playPauseButton: document.getElementById('playPauseButton'),
         resetButton: document.getElementById('resetButton'),
         hrValue: document.getElementById('hrValue'),
@@ -778,6 +783,27 @@ window.onload = function() {
                 positions[idx + 1] += velocityY;
                 positions[idx + 2] += velocityZ;
 
+                // Valve interactions - particles bounce off closed valves
+                if (isValveInteract) {
+                    const particlePos = new THREE.Vector3(positions[idx], positions[idx + 1], positions[idx + 2]);
+                    valveMeshes.forEach((valve, valveIdx) => {
+                        const valveOpen = valve.scale.y; // Open factor from valve animation
+                        const distToValve = particlePos.distanceTo(valve.position);
+                        if (distToValve < 0.4 && valveOpen < 0.5) { // Near closed valve
+                            // Reflect velocity (regurgitation proxy)
+                            const valveDir = new THREE.Vector3();
+                            valve.getWorldDirection(valveDir);
+                            const velocity = new THREE.Vector3(velocityX, velocityY, velocityZ);
+                            velocity.reflect(valveDir);
+                            velocity.multiplyScalar(0.8); // Dampen for realism
+                            // Update positions with reflected velocity
+                            positions[idx] += velocity.x;
+                            positions[idx + 1] += velocity.y;
+                            positions[idx + 2] += velocity.z;
+                        }
+                    });
+                }
+
                 // Wrap particles around bounds
                 if (Math.abs(positions[idx]) > 2) positions[idx] = -Math.sign(positions[idx]) * 2;
                 if (Math.abs(positions[idx + 1]) > 2) positions[idx + 1] = -Math.sign(positions[idx + 1]) * 2;
@@ -794,6 +820,8 @@ window.onload = function() {
                 const phase = sync.getPhase(i);
                 const openFactor = Math.abs(Math.sin(phase)); // Open during systole/diastole proxy
                 valve.scale.set(1, openFactor, 1); // Scale to simulate opening/closing
+                // Color feedback: green when open, red when closed
+                valve.material.color.setHex(openFactor > 0.5 ? 0x00ff00 : 0xff0000);
                 valve.visible = true;
             });
         } else {
@@ -816,7 +844,10 @@ window.onload = function() {
         dom.spiralDisplay.textContent = `${data.spiralDetection.toFixed(3)}`;
         dom.shearDisplay.textContent = `${data.shearProxy.toFixed(2)} Pa`;
         dom.hemolysisDisplay.textContent = `${data.hemolysisIndex.toFixed(4)} g/100L`;
-        const regurgitationProxy = (1 - data.gci) * 10; // % backflow proxy based on desync
+        let regurgitationProxy = (1 - data.gci) * 10; // % backflow proxy based on desync
+        if (isValveInteract) {
+            regurgitationProxy *= 1.5; // Amplify proxy when interactions active
+        }
         dom.regurgDisplay.textContent = `${regurgitationProxy.toFixed(1)} %`;
         const chart = telemetryChart.data;
         const time = performance.now()/1000;
@@ -1121,6 +1152,7 @@ window.onload = function() {
     });
     dom.cfdToggle.addEventListener('change', () => isCfd = dom.cfdToggle.checked);
     dom.valvesToggle.addEventListener('change', () => isValvesViz = dom.valvesToggle.checked);
+    dom.valveInteractToggle.addEventListener('change', () => isValveInteract = dom.valveInteractToggle.checked);
     dom.playPauseButton.addEventListener('click', () => {
         isPaused = !isPaused;
         dom.playPauseButton.textContent = isPaused ? 'Play' : 'Pause';
