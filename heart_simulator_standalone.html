@@ -453,15 +453,24 @@ window.onload = function() {
 
     function initGraphics() {
         scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e); // Dark blue background instead of black
         camera = new THREE.PerspectiveCamera(75, canvasContainer.clientWidth / canvasContainer.clientHeight, 0.1, 1000);
-        camera.position.z = 5;
+        camera.position.set(0, 0, 5);
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
         canvasContainer.appendChild(renderer.domElement);
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
-        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-        scene.add(new THREE.DirectionalLight(0xffffff, 0.5));
+
+        // Enhanced lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        directionalLight.position.set(5, 5, 5);
+        scene.add(directionalLight);
+        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+        directionalLight2.position.set(-5, -5, -5);
+        scene.add(directionalLight2);
 
         // Initialize cross-section plane
         crossSectionCanvas = document.createElement('canvas');
@@ -708,16 +717,52 @@ window.onload = function() {
         exportBuffer = [];
         phantomFlowField = null;
         if (nodeMesh) scene.remove(nodeMesh);
+
         const geo = icosahedronGeometry();
+        console.log('Icosahedron has', geo.vertices.length, 'vertices');
+
         const sphereGeo = new THREE.SphereGeometry(0.2, 16, 12);
         const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
         nodeMesh = new THREE.InstancedMesh(sphereGeo, mat, geo.vertices.length);
+        console.log('Created instanced mesh with', geo.vertices.length, 'instances');
+
+        // Initialize positions and colors for each vertex
+        const dummy = new THREE.Object3D();
+        const color = new THREE.Color();
+        const quadrants = [
+            {row: 0, col: 0, color: ChamberColors.LA},
+            {row: 0, col: 1, color: ChamberColors.RA},
+            {row: 1, col: 0, color: ChamberColors.LV},
+            {row: 1, col: 1, color: ChamberColors.RV}
+        ];
+
+        for (let i = 0; i < geo.vertices.length; i++) {
+            let quadIdx = 0;
+            if (geo.vertices[i][0] > 0) quadIdx += 1;
+            if (geo.vertices[i][1] < 0) quadIdx += 2;
+
+            const scaledPos = geo.vertices[i].map(v => v * 2.0);
+            dummy.position.fromArray(scaledPos);
+            dummy.scale.set(1, 1, 1);
+            dummy.updateMatrix();
+            nodeMesh.setMatrixAt(i, dummy.matrix);
+
+            color.copy(quadrants[quadIdx].color);
+            nodeMesh.setColorAt(i, color);
+        }
+        nodeMesh.instanceMatrix.needsUpdate = true;
+        nodeMesh.instanceColor.needsUpdate = true;
+
         scene.add(nodeMesh);
         if (telemetryChart) telemetryChart.destroy();
         initChart();
         lastUpdateTime = Date.now();
         isPaused = false;
         dom.playPauseButton.textContent = "Pause";
+
+        // Render initial frame
+        updateGraphics();
+
         if (!animationFrameId) animationFrameId = requestAnimationFrame(mainLoop);
     }
 
@@ -755,10 +800,27 @@ window.onload = function() {
     });
     dom.resetButton.addEventListener('click', setup);
 
+    // Verify canvasContainer exists
+    if (!canvasContainer) {
+        console.error('Canvas container not found!');
+        return;
+    }
+
+    console.log('Initializing heart simulator...');
+    console.log('Canvas container size:', canvasContainer.clientWidth, 'x', canvasContainer.clientHeight);
+
     initGraphics();
+    console.log('Graphics initialized');
+
     initChart();
+    console.log('Chart initialized');
+
     window.applyPreset('normal');
+    console.log('Preset applied');
+
     setup();
+    console.log('Setup complete, scene should be visible');
+
     new ResizeObserver(() => {
         renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
         camera.aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
