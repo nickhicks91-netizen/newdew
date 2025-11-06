@@ -107,6 +107,10 @@
                     <label class="switch"><input type="checkbox" id="particleTrailsToggle"><span class="slider"></span></label>
                 </div>
                 <div class="flex justify-between items-center mt-2">
+                    <span class="font-medium text-gray-300">Blood Flow Sim</span>
+                    <label class="switch"><input type="checkbox" id="bloodFlowToggle"><span class="slider"></span></label>
+                </div>
+                <div class="flex justify-between items-center mt-2">
                     <span class="font-medium text-gray-300">Heart Valves Viz</span>
                     <label class="switch"><input type="checkbox" id="valvesToggle"><span class="slider"></span></label>
                 </div>
@@ -199,6 +203,7 @@ window.onload = function() {
     let crossSectionPlane, crossSectionTexture, crossSectionCanvas, crossSectionCtx, isCrossSection = false;
     let isColorCoded = true, isFlowViz = false, flowArrows = [];
     let isParticleTrails = false, particles = [], particleMaterial, particleGeometry, particlePoints;
+    let isBloodFlow = false;
     let isValvesViz = false, valveMeshes = [];
     let animationFrameId, lastUpdateTime = 0;
     let isPaused = false, isPhantomMode = false, isValidateMode = false, isBaroreflexOn = true;
@@ -224,6 +229,7 @@ window.onload = function() {
         colorToggle: document.getElementById('colorToggle'),
         flowVizToggle: document.getElementById('flowVizToggle'),
         particleTrailsToggle: document.getElementById('particleTrailsToggle'),
+        bloodFlowToggle: document.getElementById('bloodFlowToggle'),
         valvesToggle: document.getElementById('valvesToggle'),
         playPauseButton: document.getElementById('playPauseButton'),
         resetButton: document.getElementById('resetButton'),
@@ -595,18 +601,35 @@ window.onload = function() {
             flowArrows = [];
         }
 
-        // Particle trails
-        if (isParticleTrails) {
+        // Particle trails and blood flow simulation
+        if (isBloodFlow || isParticleTrails) {
             particlePoints.visible = true;
             const positions = particleGeometry.attributes.position.array;
             const avgU = model.getAverageU();
+            const shearProxy = model.getShearProxy();
+            const modelTime = model.time || 0;
 
             for (let i = 0; i < positions.length / 3; i++) {
                 const idx = i * 3;
-                // Update particle positions based on velocities
-                positions[idx] += particles[idx] * (1 + avgU * 2);
-                positions[idx + 1] += particles[idx + 1] * (1 + avgU * 2);
-                positions[idx + 2] += particles[idx + 2] * (1 + avgU * 2);
+
+                // Enhanced velocity calculation with blood flow physics
+                let velocityX = particles[idx] * (1 + avgU * 2);
+                let velocityY = particles[idx + 1] * (1 + avgU * 2);
+                let velocityZ = particles[idx + 2] * (1 + avgU * 2);
+
+                if (isBloodFlow) {
+                    // Add time-based pulsatile flow
+                    velocityX += Math.sin(modelTime) * 0.05;
+                    // Incorporate shear as lateral flow
+                    velocityY += (shearProxy / 150) * 0.2;
+                    // RSA-modulated axial flow
+                    velocityZ += Math.cos(sync.getPhase(0)) * 0.05 * (1 + SimConfig.rsa);
+                }
+
+                // Update particle positions based on enhanced velocities
+                positions[idx] += velocityX;
+                positions[idx + 1] += velocityY;
+                positions[idx + 2] += velocityZ;
 
                 // Wrap particles around bounds
                 if (Math.abs(positions[idx]) > 2) positions[idx] = -Math.sign(positions[idx]) * 2;
@@ -707,6 +730,7 @@ window.onload = function() {
         if (elapsed > SimConfig.dt) {
             lastUpdateTime = now;
             model.step(SimConfig.noise);
+            model.time = (model.time || 0) + SimConfig.dt; // Track sim time for pulsatility
             sync.step(SimConfig.dt, SimConfig.rsa, baseHR);
 
             const quadrants = [{row: 0, col: 0}, {row: 0, col: 1}, {row: 1, col: 0}, {row: 1, col: 1}];
@@ -879,6 +903,10 @@ window.onload = function() {
     dom.colorToggle.addEventListener('change', () => isColorCoded = dom.colorToggle.checked);
     dom.flowVizToggle.addEventListener('change', () => isFlowViz = dom.flowVizToggle.checked);
     dom.particleTrailsToggle.addEventListener('change', () => isParticleTrails = dom.particleTrailsToggle.checked);
+    dom.bloodFlowToggle.addEventListener('change', () => {
+        isBloodFlow = dom.bloodFlowToggle.checked;
+        particlePoints.visible = isBloodFlow || isParticleTrails;
+    });
     dom.valvesToggle.addEventListener('change', () => isValvesViz = dom.valvesToggle.checked);
     dom.playPauseButton.addEventListener('click', () => {
         isPaused = !isPaused;
