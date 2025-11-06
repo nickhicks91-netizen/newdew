@@ -150,6 +150,10 @@
                     <span class="font-medium text-gray-300">Phantom Flow Mode</span>
                     <label class="switch"><input type="checkbox" id="phantomModeToggle"><span class="slider"></span></label>
                 </div>
+                <div class="flex justify-between items-center mt-2">
+                    <span class="font-medium text-gray-300">Cross-Section View</span>
+                    <label class="switch"><input type="checkbox" id="crossSectionToggle"><span class="slider"></span></label>
+                </div>
                 <button id="stimulateButton" class="w-full mt-4 bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">⚡ Stimulate Chamber</button>
                 <button id="exportButton" class="w-full mt-2 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Export for Actuator</button>
             </div>
@@ -233,6 +237,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 window.onload = function() {
     let scene, camera, renderer, controls, chamberMeshes = [], telemetryChart, phantomFlowField;
+    let crossSectionPlane, crossSectionTexture, crossSectionCanvas, crossSectionCtx, isCrossSection = false;
     let animationFrameId, lastUpdateTime = 0;
     let isPaused = false, isPhantomMode = false, isValidateMode = false, isBaroreflexOn = true;
     let exportBuffer = [];
@@ -250,6 +255,7 @@ window.onload = function() {
         validateToggle: document.getElementById('validateToggle'),
         validationDisplay: document.getElementById('validation-display'),
         phantomModeToggle: document.getElementById('phantomModeToggle'),
+        crossSectionToggle: document.getElementById('crossSectionToggle'),
         stimulateButton: document.getElementById('stimulateButton'),
         exportButton: document.getElementById('exportButton'),
         playPauseButton: document.getElementById('playPauseButton'),
@@ -425,6 +431,20 @@ window.onload = function() {
         controls.enableDamping = true;
         scene.add(new THREE.AmbientLight(0xffffff, 0.7));
         scene.add(new THREE.DirectionalLight(0xffffff, 0.5));
+
+        // Initialize cross-section plane
+        crossSectionCanvas = document.createElement('canvas');
+        crossSectionCanvas.width = 50; // Match grid size
+        crossSectionCanvas.height = 50;
+        crossSectionCtx = crossSectionCanvas.getContext('2d');
+        crossSectionTexture = new THREE.CanvasTexture(crossSectionCanvas);
+        const planeGeo = new THREE.PlaneGeometry(1.2, 1.2); // Size to fit chamber
+        const planeMat = new THREE.MeshBasicMaterial({ map: crossSectionTexture, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+        crossSectionPlane = new THREE.Mesh(planeGeo, planeMat);
+        crossSectionPlane.position.set(1.5, -1.5, 0); // Position in LV
+        crossSectionPlane.rotation.set(0, Math.PI / 2, 0); // Rotate for cross-section
+        crossSectionPlane.visible = false;
+        scene.add(crossSectionPlane);
     }
 
     function initChart() {
@@ -454,6 +474,32 @@ window.onload = function() {
             mesh.material.emissiveIntensity = emissiveIntensity;
             mesh.material.color.set(colors[i].clone().lerp(new THREE.Color(1,1,1), avgU * 0.5));
         });
+
+        // Update cross-section view
+        if (isCrossSection) {
+            // Update canvas with u field from LV (models[2])
+            const u = models[2].u;
+            const imageData = crossSectionCtx.createImageData(50, 50);
+            for (let i = 0; i < 50; i++) {
+                for (let j = 0; j < 50; j++) {
+                    const val = u[i * 50 + j];
+                    const idx = (i * 50 + j) * 4;
+                    const r = Math.floor(255 * val); // Red for high potential
+                    const g = 0;
+                    const b = Math.floor(255 * (1 - val)); // Blue for low
+                    imageData.data[idx] = r;
+                    imageData.data[idx + 1] = g;
+                    imageData.data[idx + 2] = b;
+                    imageData.data[idx + 3] = 255; // Alpha
+                }
+            }
+            crossSectionCtx.putImageData(imageData, 0, 0);
+            crossSectionTexture.needsUpdate = true;
+            crossSectionPlane.visible = true;
+        } else {
+            crossSectionPlane.visible = false;
+        }
+
         controls.update();
         renderer.render(scene, camera);
     }
@@ -633,6 +679,7 @@ window.onload = function() {
     });
     dom.validateToggle.addEventListener('change', () => isValidateMode = dom.validateToggle.checked);
     dom.phantomModeToggle.addEventListener('change', () => isPhantomMode = dom.phantomModeToggle.checked);
+    dom.crossSectionToggle.addEventListener('change', () => isCrossSection = dom.crossSectionToggle.checked);
     dom.stimulateButton.addEventListener('click', () => models[0].stimulate());
     dom.exportButton.addEventListener('click', () => {
         if (exportBuffer.length === 0) return alert('No data to export.');
