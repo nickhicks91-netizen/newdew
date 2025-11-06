@@ -244,7 +244,7 @@
         </div>
         <div class="telemetry-card flex justify-between items-center">
             <span class="font-bold text-sm text-purple-400">INTERMACS Level</span>
-            <span id="intermacs Display" class="font-mono text-lg font-bold text-white">--</span>
+            <span id="intermacsDisplay" class="font-mono text-lg font-bold text-white">--</span>
         </div>
         <div class="telemetry-card flex justify-between items-center">
             <span class="font-bold text-sm text-green-400">Device vs HeartMate 3</span>
@@ -1057,6 +1057,11 @@ window.onload = function() {
     }
 
     function initChart() {
+        if (!dom.telemetryCanvas || !dom.pvLoopCanvas) {
+            console.error('Chart canvases not found');
+            return;
+        }
+
         telemetryChart = new Chart(dom.telemetryCanvas, {
             type: 'line',
             data: { labels: [], datasets: [
@@ -1929,6 +1934,11 @@ window.onload = function() {
         scene.add(wireframe);
 
         if (telemetryChart) telemetryChart.destroy();
+        if (pvLoopChart) pvLoopChart.destroy();
+        pvLoopData = []; // Clear PV loop data
+        cumulativeStress = 0; // Reset reliability metrics
+        operatingHours = 0;
+        ecgBuffer = []; // Reset ECG correlation
         initChart();
         lastUpdateTime = Date.now();
         isPaused = false;
