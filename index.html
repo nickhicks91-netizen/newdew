@@ -911,7 +911,9 @@ window.onload = function() {
             `
         });
 
-        // Initialize 3D Volume Rendering
+        // Initialize 3D Volume Rendering (requires WebGL 2.0)
+        // Temporarily disabled due to WebGL 1.0 compatibility
+        /*
         volumeTexture = new THREE.Data3DTexture(new Float32Array(50 * 50 * 50), 50, 50, 50);
         volumeTexture.format = THREE.RedFormat;
         volumeTexture.type = THREE.FloatType;
@@ -991,8 +993,11 @@ window.onload = function() {
         volumeMesh = new THREE.Mesh(volumeGeo, volumeMaterial);
         volumeMesh.visible = false;
         scene.add(volumeMesh);
+        */
 
-        // GPU-accelerated volume texture update setup
+        // GPU-accelerated volume texture update setup (requires WebGL 2.0)
+        // Temporarily disabled
+        /*
         // Create 2D texture to hold electrical field data
         const fieldData = new Float32Array(50 * 50 * 4);
         const fieldTexture = new THREE.DataTexture(fieldData, 50, 50, THREE.RGBAFormat, THREE.FloatType);
@@ -1052,6 +1057,7 @@ window.onload = function() {
         volumeUpdateCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
         volumeUpdateMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), volumeUpdateMaterial);
         volumeUpdateScene.add(volumeUpdateMesh);
+        */
 
         console.log('Graphics initialized, scene has', scene.children.length, 'children');
     }
@@ -1749,6 +1755,8 @@ window.onload = function() {
             }
 
             // 3D Volume Rendering - GPU-accelerated volume texture update
+            // Temporarily disabled due to WebGL 1.0 compatibility
+            /*
             if (isVolumeRender && volumeTexture && volumeUpdateMaterial) {
                 const size = 50;
 
@@ -1795,6 +1803,7 @@ window.onload = function() {
             } else if (volumeMesh) {
                 volumeMesh.visible = false;
             }
+            */
 
             // ECG waveform validation - calculate correlation with real ECG data
             ecgBuffer.push(ecg);
