@@ -111,6 +111,10 @@
                     <label class="switch"><input type="checkbox" id="bloodFlowToggle"><span class="slider"></span></label>
                 </div>
                 <div class="flex justify-between items-center mt-2">
+                    <span class="font-medium text-gray-300">Blood Cells Viz</span>
+                    <label class="switch"><input type="checkbox" id="bloodCellsToggle"><span class="slider"></span></label>
+                </div>
+                <div class="flex justify-between items-center mt-2">
                     <span class="font-medium text-gray-300">CFD Hemodynamics</span>
                     <label class="switch"><input type="checkbox" id="cfdToggle"><span class="slider"></span></label>
                 </div>
@@ -217,6 +221,7 @@ window.onload = function() {
         { points: [new THREE.Vector3(0, 0.8, 0), new THREE.Vector3(-0.8, 0, 0), new THREE.Vector3(0, -0.8, 0), new THREE.Vector3(0.8, 0, 0)] }  // Circular systemic loop
     ];
     let isBloodFlow = false;
+    let isBloodCells = false, bloodCells = [], bloodCellGeometry, bloodCellMaterial;
     let isCfd = false, cfdPlane, cfdVelocityTexture, cfdPressureTexture, cfdRendererTargetA, cfdRendererTargetB;
     let cfdAdvectionMaterial, cfdDiffusionMaterial, cfdProjectionMaterial, cfdDisplayMaterial;
     let isValvesViz = false, isValveInteract = false, valveMeshes = [];
@@ -245,6 +250,7 @@ window.onload = function() {
         flowVizToggle: document.getElementById('flowVizToggle'),
         particleTrailsToggle: document.getElementById('particleTrailsToggle'),
         bloodFlowToggle: document.getElementById('bloodFlowToggle'),
+        bloodCellsToggle: document.getElementById('bloodCellsToggle'),
         cfdToggle: document.getElementById('cfdToggle'),
         valvesToggle: document.getElementById('valvesToggle'),
         valveInteractToggle: document.getElementById('valveInteractToggle'),
@@ -500,6 +506,16 @@ window.onload = function() {
 
         scene.add(particlePoints);
         particlePoints.visible = false;
+
+        // Initialize blood cells (RBCs) as small red spheres
+        bloodCellGeometry = new THREE.SphereGeometry(0.02, 8, 8);
+        bloodCellMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        for (let i = 0; i < 50; i++) {
+            const cell = new THREE.Mesh(bloodCellGeometry, bloodCellMaterial);
+            cell.visible = false;
+            scene.add(cell);
+            bloodCells.push(cell);
+        }
 
         // Add 4 valves: mitral (LA-LV), tricuspid (RA-RV), aortic (LV-aorta proxy), pulmonary (RV-pulmonary proxy)
         const valveGeo = new THREE.PlaneGeometry(0.3, 0.3);
@@ -1066,6 +1082,30 @@ window.onload = function() {
 
             updateTelemetry({ ecg, avgU, hr: baseHR, co, sys, dias, gci, plv, energy, winding, ejectionFraction, spiralDetection, shearProxy, hemolysisIndex });
             updateGraphics();
+
+            // Update blood cells to follow particles
+            if (isBloodCells && particles.length > 0) {
+                const positions = particleGeometry.attributes.position.array;
+                bloodCells.forEach((cell, i) => {
+                    const particleIdx = i % particles.length;
+                    const idx = particleIdx * 3;
+                    const particle = particles[particleIdx];
+
+                    // Set cell position from particle
+                    cell.position.set(positions[idx], positions[idx + 1], positions[idx + 2]);
+
+                    // Add rotation for realism
+                    if (isValveInteract && particle && particle.velocity) {
+                        cell.rotation.x += particle.velocity.x * 0.1;
+                        cell.rotation.y += particle.velocity.y * 0.1;
+                        cell.rotation.z += particle.velocity.z * 0.1;
+                    }
+
+                    cell.visible = true;
+                });
+            } else {
+                bloodCells.forEach(cell => cell.visible = false);
+            }
         }
         animationFrameId = requestAnimationFrame(mainLoop);
     }
@@ -1209,6 +1249,7 @@ window.onload = function() {
         isBloodFlow = dom.bloodFlowToggle.checked;
         particlePoints.visible = isBloodFlow || isParticleTrails;
     });
+    dom.bloodCellsToggle.addEventListener('change', () => isBloodCells = dom.bloodCellsToggle.checked);
     dom.cfdToggle.addEventListener('change', () => isCfd = dom.cfdToggle.checked);
     dom.valvesToggle.addEventListener('change', () => isValvesViz = dom.valvesToggle.checked);
     dom.valveInteractToggle.addEventListener('change', () => isValveInteract = dom.valveInteractToggle.checked);
