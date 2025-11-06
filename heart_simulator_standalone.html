@@ -325,18 +325,29 @@ window.onload = function() {
         const dummy = new THREE.Object3D();
         for (let i = 0; i < liveSim.N; i++) {
             const activation = (liveSim.v[i] + 1.2) / 2.4;
-            const n = heartModel.meta.n;
+
+            // Determine base chamber color
             let baseColor;
             if (i >= heartModel.meta.offsets.LV) baseColor = ChamberColors.LV;
             else if (i >= heartModel.meta.offsets.RV) baseColor = ChamberColors.RV;
             else if (i >= heartModel.meta.offsets.LA) baseColor = ChamberColors.LA;
             else baseColor = ChamberColors.RA;
-            if (isChamberView && baseColor) color.copy(baseColor).lerp(new THREE.Color(1,1,1), Math.max(0, (activation - 0.5) * 2));
-            else color.setHSL(0.66 - activation * 0.66, 1, 0.6);
+
+            // Color logic: Always use chamber colors, modulate brightness by activation
+            if (isChamberView) {
+                // Chamber view: brighten on activation
+                color.copy(baseColor).lerp(new THREE.Color(1, 1, 1), activation * 0.5);
+            } else {
+                // Default view: chamber color with activation glow
+                const glowColor = new THREE.Color().setHSL(0.1, 1.0, 0.5); // Orange glow
+                color.copy(baseColor).lerp(glowColor, Math.max(0, activation - 0.3));
+            }
             nodeMesh.setColorAt(i, color);
+
+            // Enhanced pulsing effect based on activation
             dummy.position.fromArray(heartModel.V_all[i]);
-            const scale = 1.0 + liveSim.v[i] * 0.5;
-            dummy.scale.set(scale, scale, scale);
+            const pulseScale = 1.0 + activation * 0.8; // More dramatic pulsing (0.8x amplitude)
+            dummy.scale.set(pulseScale, pulseScale, pulseScale);
             dummy.updateMatrix();
             nodeMesh.setMatrixAt(i, dummy.matrix);
         }
@@ -464,15 +475,25 @@ window.onload = function() {
         if(scene) while(scene.children.length > 0) scene.remove(scene.children[0]);
 
         const nodeGeo = new THREE.SphereGeometry(0.08, 16, 12);
-        const nodeMat = new THREE.MeshPhongMaterial({ vertexColors: true });
+        const nodeMat = new THREE.MeshPhongMaterial({ vertexColors: THREE.VertexColors });
         nodeMesh = new THREE.InstancedMesh(nodeGeo, nodeMat, liveSim.N);
 
         const dummy = new THREE.Object3D();
+        const color = new THREE.Color();
         for(let i=0; i<liveSim.N; i++) {
             dummy.position.fromArray(heartModel.V_all[i]);
             dummy.updateMatrix();
             nodeMesh.setMatrixAt(i, dummy.matrix);
+
+            // Initialize colors based on chamber
+            if (i >= heartModel.meta.offsets.LV) color.copy(ChamberColors.LV);
+            else if (i >= heartModel.meta.offsets.RV) color.copy(ChamberColors.RV);
+            else if (i >= heartModel.meta.offsets.LA) color.copy(ChamberColors.LA);
+            else color.copy(ChamberColors.RA);
+            nodeMesh.setColorAt(i, color);
         }
+        nodeMesh.instanceMatrix.needsUpdate = true;
+        nodeMesh.instanceColor.needsUpdate = true;
         scene.add(nodeMesh);
 
         if(telemetryChart) telemetryChart.destroy();
