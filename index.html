@@ -196,6 +196,22 @@
             <span id="ecgCorrDisplay" class="font-mono text-xl font-bold text-white">--</span>
         </div>
         <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-lg text-purple-400">LA Volume</span>
+            <span id="laVolDisplay" class="font-mono text-xl font-bold text-white">-- mL</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-lg text-blue-400">RA Volume</span>
+            <span id="raVolDisplay" class="font-mono text-xl font-bold text-white">-- mL</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-lg text-yellow-400">LV Volume</span>
+            <span id="lvVolDisplay" class="font-mono text-xl font-bold text-white">-- mL</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
+            <span class="font-bold text-lg text-green-400">RV Volume</span>
+            <span id="rvVolDisplay" class="font-mono text-xl font-bold text-white">-- mL</span>
+        </div>
+        <div class="telemetry-card flex justify-between items-center">
             <span class="font-bold text-lg text-orange-400">Shear Stress Proxy</span>
             <span id="shearDisplay" class="font-mono text-xl font-bold text-white">-- Pa</span>
         </div>
@@ -244,6 +260,7 @@ window.onload = function() {
     let isVolumeRender = false, volumeMesh, volumeTexture, volumeMaterial;
     let vtfThreshold = 0.5, vtfOpacity = 0.8;
     let volumeUpdateMaterial, volumeUpdateTarget, volumeUpdateScene, volumeUpdateCamera, volumeUpdateMesh;
+    let chamberMeshes = {}, flowArrowsInterChamber = [], chamberVolumes = {};
     let animationFrameId, lastUpdateTime = 0;
     let isPaused = false, isPhantomMode = false, isValidateMode = false, isBaroreflexOn = true;
     let exportBuffer = [];
@@ -296,6 +313,10 @@ window.onload = function() {
         efDisplay: document.getElementById('efDisplay'),
         spiralDisplay: document.getElementById('spiralDisplay'),
         ecgCorrDisplay: document.getElementById('ecgCorrDisplay'),
+        laVolDisplay: document.getElementById('laVolDisplay'),
+        raVolDisplay: document.getElementById('raVolDisplay'),
+        lvVolDisplay: document.getElementById('lvVolDisplay'),
+        rvVolDisplay: document.getElementById('rvVolDisplay'),
         shearDisplay: document.getElementById('shearDisplay'),
         hemolysisDisplay: document.getElementById('hemolysisDisplay'),
         regurgDisplay: document.getElementById('regurgDisplay'),
@@ -599,18 +620,92 @@ window.onload = function() {
             bloodCells.push(cell);
         }
 
-        // Add 4 valves: mitral (LA-LV), tricuspid (RA-RV), aortic (LV-aorta proxy), pulmonary (RV-pulmonary proxy)
+        // Create anatomically accurate chamber geometries
+        // Atria (smaller, ellipsoid, positioned superiorly)
+        const laGeo = new THREE.SphereGeometry(0.4, 16, 12);
+        laGeo.scale(0.9, 0.8, 0.8); // Slightly flattened
+        const laMatChamber = new THREE.MeshStandardMaterial({
+            color: ChamberColors.LA,
+            transparent: true,
+            opacity: 0.7,
+            side: THREE.DoubleSide
+        });
+        chamberMeshes.LA = new THREE.Mesh(laGeo, laMatChamber);
+        chamberMeshes.LA.position.set(-0.6, 0.8, 0);
+        scene.add(chamberMeshes.LA);
+
+        const raGeo = new THREE.SphereGeometry(0.4, 16, 12);
+        raGeo.scale(0.9, 0.8, 0.8);
+        const raMatChamber = new THREE.MeshStandardMaterial({
+            color: ChamberColors.RA,
+            transparent: true,
+            opacity: 0.7,
+            side: THREE.DoubleSide
+        });
+        chamberMeshes.RA = new THREE.Mesh(raGeo, raMatChamber);
+        chamberMeshes.RA.position.set(0.6, 0.8, 0);
+        scene.add(chamberMeshes.RA);
+
+        // Ventricles (larger, conical, positioned inferiorly)
+        const lvGeo = new THREE.ConeGeometry(0.6, 1.2, 16);
+        const lvMatChamber = new THREE.MeshStandardMaterial({
+            color: ChamberColors.LV,
+            transparent: true,
+            opacity: 0.7,
+            side: THREE.DoubleSide
+        });
+        chamberMeshes.LV = new THREE.Mesh(lvGeo, lvMatChamber);
+        chamberMeshes.LV.position.set(-0.6, -0.4, 0);
+        chamberMeshes.LV.rotation.x = Math.PI; // Point downward
+        scene.add(chamberMeshes.LV);
+
+        const rvGeo = new THREE.ConeGeometry(0.55, 1.1, 16); // Slightly smaller than LV
+        const rvMatChamber = new THREE.MeshStandardMaterial({
+            color: ChamberColors.RV,
+            transparent: true,
+            opacity: 0.7,
+            side: THREE.DoubleSide
+        });
+        chamberMeshes.RV = new THREE.Mesh(rvGeo, rvMatChamber);
+        chamberMeshes.RV.position.set(0.6, -0.4, 0);
+        chamberMeshes.RV.rotation.x = Math.PI;
+        scene.add(chamberMeshes.RV);
+
+        // Add 4 valves with anatomically correct positions
         const valveGeo = new THREE.PlaneGeometry(0.3, 0.3);
         const valveMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
-        ['mitral', 'tricuspid', 'aortic', 'pulmonary'].forEach((type, i) => {
-            const valve = new THREE.Mesh(valveGeo, valveMat);
-            valve.visible = false;
-            // Position proxies: mitral at bottom-left quadrant center, etc.
-            valve.position.set(i % 2 === 0 ? -0.5 : 0.5, i < 2 ? -0.5 : 0.5, 0);
-            valve.rotation.set(Math.PI / 2, 0, 0);
-            scene.add(valve);
-            valveMeshes.push(valve);
-        });
+
+        // Mitral valve (LA → LV)
+        const mitral = new THREE.Mesh(valveGeo, valveMat.clone());
+        mitral.position.set(-0.6, 0.2, 0);
+        mitral.rotation.set(Math.PI / 2, 0, 0);
+        mitral.visible = false;
+        scene.add(mitral);
+        valveMeshes.push(mitral);
+
+        // Tricuspid valve (RA → RV)
+        const tricuspid = new THREE.Mesh(valveGeo, valveMat.clone());
+        tricuspid.position.set(0.6, 0.2, 0);
+        tricuspid.rotation.set(Math.PI / 2, 0, 0);
+        tricuspid.visible = false;
+        scene.add(tricuspid);
+        valveMeshes.push(tricuspid);
+
+        // Aortic valve (LV → Aorta)
+        const aortic = new THREE.Mesh(valveGeo, valveMat.clone());
+        aortic.position.set(-0.6, -1.0, 0);
+        aortic.rotation.set(Math.PI / 2, 0, 0);
+        aortic.visible = false;
+        scene.add(aortic);
+        valveMeshes.push(aortic);
+
+        // Pulmonary valve (RV → Pulmonary artery)
+        const pulmonary = new THREE.Mesh(valveGeo, valveMat.clone());
+        pulmonary.position.set(0.6, -1.0, 0);
+        pulmonary.rotation.set(Math.PI / 2, 0, 0);
+        pulmonary.visible = false;
+        scene.add(pulmonary);
+        valveMeshes.push(pulmonary);
 
         // Setup CFD hemodynamics system
         cfdPlane = new THREE.Mesh(
@@ -916,12 +1011,62 @@ window.onload = function() {
         const dummy = new THREE.Object3D();
         const color = new THREE.Color();
         const quadrants = [
-            {row: 0, col: 0, color: ChamberColors.LA},
-            {row: 0, col: 1, color: ChamberColors.RA},
-            {row: 1, col: 0, color: ChamberColors.LV},
-            {row: 1, col: 1, color: ChamberColors.RV}
+            {row: 0, col: 0, color: ChamberColors.LA, name: 'LA'},
+            {row: 0, col: 1, color: ChamberColors.RA, name: 'RA'},
+            {row: 1, col: 0, color: ChamberColors.LV, name: 'LV'},
+            {row: 1, col: 1, color: ChamberColors.RV, name: 'RV'}
         ];
 
+        // Animate anatomically accurate chambers
+        quadrants.forEach((q, idx) => {
+            const avgU = model.getQuadrantAverage(q);
+            const phase = sync.getPhase(idx);
+
+            // Determine cardiac cycle phase
+            const normalizedPhase = (phase % (2 * Math.PI)) / (2 * Math.PI);
+
+            // Atria contract early (P-wave), ventricles contract later (QRS)
+            let isAtrium = q.name === 'LA' || q.name === 'RA';
+            let isVentricle = q.name === 'LV' || q.name === 'RV';
+
+            // Atrial systole: 0.0-0.2, Atrial diastole: 0.2-1.0
+            // Ventricular systole: 0.2-0.5, Ventricular diastole: 0.5-1.0
+            let contractionPhase = 0;
+            if (isAtrium) {
+                contractionPhase = normalizedPhase < 0.2 ? Math.sin(normalizedPhase * Math.PI / 0.2) : 0;
+            } else {
+                contractionPhase = (normalizedPhase >= 0.2 && normalizedPhase < 0.5) ?
+                    Math.sin((normalizedPhase - 0.2) * Math.PI / 0.3) : 0;
+            }
+
+            // Volume calculation (end-diastolic volume - stroke volume * contraction)
+            const edv = isAtrium ? 50 : (q.name === 'LV' ? 120 : 100); // mL
+            const sv = isAtrium ? 15 : (q.name === 'LV' ? 70 : 70); // mL
+            const volume = edv - sv * contractionPhase * (0.8 + 0.2 * avgU);
+            chamberVolumes[q.name] = volume;
+
+            // Scale chambers based on volume (cube root for 3D scaling)
+            const volumeScale = Math.pow(volume / edv, 1/3);
+            const pulsation = volumeScale * (1 + 0.1 * avgU); // Add electrical potential modulation
+
+            if (chamberMeshes[q.name]) {
+                chamberMeshes[q.name].scale.set(pulsation, pulsation, pulsation);
+
+                // Pressure-based color (higher pressure = more saturated)
+                const pressure = (1 - contractionPhase) * 50 + contractionPhase * (q.name === 'LV' ? 120 : 25);
+                const pressureNormalized = Math.min(pressure / 120, 1.0);
+
+                if (isColorCoded) {
+                    color.copy(q.color).lerp(new THREE.Color(1, 0.3, 0.3), pressureNormalized * 0.5);
+                    color.lerp(new THREE.Color(1,1,1), avgU * 0.3);
+                } else {
+                    color.set(0xaaaaaa);
+                }
+                chamberMeshes[q.name].material.color.copy(color);
+            }
+        });
+
+        // Animate original icosahedron nodes
         for (let i = 0; i < geo.vertices.length; i++) {
             let quadIdx = 0;
             if (geo.vertices[i][0] > 0) quadIdx += 1;
@@ -1121,18 +1266,108 @@ window.onload = function() {
             particlePoints.visible = false;
         }
 
-        // Heart valves visualization
+        // Heart valves visualization with phase-synchronized animation
         if (isValvesViz) {
-            valveMeshes.forEach((valve, i) => {
-                const phase = sync.getPhase(i);
-                const openFactor = Math.abs(Math.sin(phase)); // Open during systole/diastole proxy
-                valve.scale.set(1, openFactor, 1); // Scale to simulate opening/closing
-                // Color feedback: green when open, red when closed
-                valve.material.color.setHex(openFactor > 0.5 ? 0x00ff00 : 0xff0000);
-                valve.visible = true;
-            });
+            const quadrants = [
+                {row: 0, col: 0, name: 'LA'},
+                {row: 0, col: 1, name: 'RA'},
+                {row: 1, col: 0, name: 'LV'},
+                {row: 1, col: 1, name: 'RV'}
+            ];
+
+            // Mitral valve (LA → LV): opens during ventricular diastole
+            const lvPhase = sync.getPhase(2);
+            const lvNormalizedPhase = (lvPhase % (2 * Math.PI)) / (2 * Math.PI);
+            const mitralOpen = (lvNormalizedPhase >= 0.5 && lvNormalizedPhase < 1.0) ||
+                               (lvNormalizedPhase >= 0.0 && lvNormalizedPhase < 0.2) ? 1.0 : 0.0;
+            valveMeshes[0].scale.set(1, mitralOpen, 1);
+            valveMeshes[0].material.color.setHex(mitralOpen > 0.5 ? 0x00ff00 : 0xff0000);
+            valveMeshes[0].visible = true;
+
+            // Tricuspid valve (RA → RV): opens during ventricular diastole
+            const rvPhase = sync.getPhase(3);
+            const rvNormalizedPhase = (rvPhase % (2 * Math.PI)) / (2 * Math.PI);
+            const tricuspidOpen = (rvNormalizedPhase >= 0.5 && rvNormalizedPhase < 1.0) ||
+                                   (rvNormalizedPhase >= 0.0 && rvNormalizedPhase < 0.2) ? 1.0 : 0.0;
+            valveMeshes[1].scale.set(1, tricuspidOpen, 1);
+            valveMeshes[1].material.color.setHex(tricuspidOpen > 0.5 ? 0x00ff00 : 0xff0000);
+            valveMeshes[1].visible = true;
+
+            // Aortic valve (LV → Aorta): opens during ventricular systole
+            const aorticOpen = (lvNormalizedPhase >= 0.2 && lvNormalizedPhase < 0.5) ? 1.0 : 0.0;
+            valveMeshes[2].scale.set(1, aorticOpen, 1);
+            valveMeshes[2].material.color.setHex(aorticOpen > 0.5 ? 0x00ff00 : 0xff0000);
+            valveMeshes[2].visible = true;
+
+            // Pulmonary valve (RV → Pulmonary): opens during ventricular systole
+            const pulmonaryOpen = (rvNormalizedPhase >= 0.2 && rvNormalizedPhase < 0.5) ? 1.0 : 0.0;
+            valveMeshes[3].scale.set(1, pulmonaryOpen, 1);
+            valveMeshes[3].material.color.setHex(pulmonaryOpen > 0.5 ? 0x00ff00 : 0xff0000);
+            valveMeshes[3].visible = true;
+
+            // Add flow direction arrows between chambers
+            flowArrowsInterChamber.forEach(arrow => scene.remove(arrow));
+            flowArrowsInterChamber = [];
+
+            // LA → LV flow (when mitral open)
+            if (mitralOpen > 0.5) {
+                const arrow = new THREE.ArrowHelper(
+                    new THREE.Vector3(0, -1, 0),
+                    new THREE.Vector3(-0.6, 0.5, 0),
+                    0.5,
+                    0x00ff00,
+                    0.15,
+                    0.1
+                );
+                flowArrowsInterChamber.push(arrow);
+                scene.add(arrow);
+            }
+
+            // RA → RV flow (when tricuspid open)
+            if (tricuspidOpen > 0.5) {
+                const arrow = new THREE.ArrowHelper(
+                    new THREE.Vector3(0, -1, 0),
+                    new THREE.Vector3(0.6, 0.5, 0),
+                    0.5,
+                    0x00ff00,
+                    0.15,
+                    0.1
+                );
+                flowArrowsInterChamber.push(arrow);
+                scene.add(arrow);
+            }
+
+            // LV → Aorta flow (when aortic open)
+            if (aorticOpen > 0.5) {
+                const arrow = new THREE.ArrowHelper(
+                    new THREE.Vector3(0, -1, 0),
+                    new THREE.Vector3(-0.6, -1.1, 0),
+                    0.4,
+                    0xff0000,
+                    0.15,
+                    0.1
+                );
+                flowArrowsInterChamber.push(arrow);
+                scene.add(arrow);
+            }
+
+            // RV → Pulmonary flow (when pulmonary open)
+            if (pulmonaryOpen > 0.5) {
+                const arrow = new THREE.ArrowHelper(
+                    new THREE.Vector3(0, -1, 0),
+                    new THREE.Vector3(0.6, -1.1, 0),
+                    0.4,
+                    0xff0000,
+                    0.15,
+                    0.1
+                );
+                flowArrowsInterChamber.push(arrow);
+                scene.add(arrow);
+            }
         } else {
             valveMeshes.forEach(valve => valve.visible = false);
+            flowArrowsInterChamber.forEach(arrow => scene.remove(arrow));
+            flowArrowsInterChamber = [];
         }
 
         controls.update();
@@ -1150,6 +1385,10 @@ window.onload = function() {
         dom.efDisplay.textContent = `${(data.ejectionFraction * 100).toFixed(1)}%`;
         dom.spiralDisplay.textContent = `${data.spiralDetection.toFixed(3)}`;
         dom.ecgCorrDisplay.textContent = `${ecgCorrelation.toFixed(3)}`;
+        dom.laVolDisplay.textContent = `${chamberVolumes.LA ? chamberVolumes.LA.toFixed(0) : '--'} mL`;
+        dom.raVolDisplay.textContent = `${chamberVolumes.RA ? chamberVolumes.RA.toFixed(0) : '--'} mL`;
+        dom.lvVolDisplay.textContent = `${chamberVolumes.LV ? chamberVolumes.LV.toFixed(0) : '--'} mL`;
+        dom.rvVolDisplay.textContent = `${chamberVolumes.RV ? chamberVolumes.RV.toFixed(0) : '--'} mL`;
         dom.shearDisplay.textContent = `${data.shearProxy.toFixed(2)} Pa`;
         dom.hemolysisDisplay.textContent = `${data.hemolysisIndex.toFixed(4)} g/100L`;
         let regurgitationProxy = (1 - data.gci) * 10; // % backflow proxy based on desync
