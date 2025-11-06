@@ -153,33 +153,23 @@ window.onload = function() {
         constructor() { this._build_chambers(); }
         _build_chambers() {
             const geom = icosahedron();
-            const place = (V, off, s) => V.map(v => v.map((c, i) => c * s + off[i]));
-            const n = geom.V.length;
 
-            const RA_V = place(geom.V, [0.6, 0, 0.6], 0.5);
-            const LA_V = place(geom.V, [-0.6, 0, 0.6], 0.5);
-            const RV_V = place(geom.V, [0.7, 0, -0.3], 0.7);
-            const LV_V = place(geom.V, [-0.7, 0, -0.3], 0.7);
+            // Single icosahedron with 12 vertices
+            this.V_all = geom.V;
+            this.N = this.V_all.length; // 12 vertices total
 
-            const offsets = { RA: 0, LA: n, RV: n * 2, LV: n * 3 };
-            this.V_all = [...RA_V, ...LA_V, ...RV_V, ...LV_V];
-            this.N = this.V_all.length;
+            // Divide 12 vertices into 4 chambers (3 vertices each)
+            // RA: vertices 0-2, LA: vertices 3-5, RV: vertices 6-8, LV: vertices 9-11
+            const offsets = { RA: 0, LA: 3, RV: 6, LV: 9 };
+
+            // Build adjacency from icosahedron edges
             this.adj = Array.from({ length: this.N }, () => []);
-            for(let ch=0; ch<4; ch++){
-                const offset = ch * n;
-                geom.edges.forEach(([i,j]) => {
-                    this.adj[offset+i].push(offset+j);
-                    this.adj[offset+j].push(offset+i);
-                });
-            }
-            this.adj[vec.argmax(RA_V, v => v[2]) + offsets.RA].push(offsets.LA + vec.argmax(LA_V, v => v[2]));
-            this.adj[offsets.LA + vec.argmax(LA_V, v => v[2])].push(vec.argmax(RA_V, v => v[2]) + offsets.RA);
-            this.adj[vec.argmin(RA_V, v => v[2]) + offsets.RA].push(offsets.RV + vec.argmax(RV_V, v => v[2]));
-            this.adj[offsets.RV + vec.argmax(RV_V, v => v[2])].push(vec.argmin(RA_V, v => v[2]) + offsets.RA);
-            this.adj[offsets.LA + vec.argmin(LA_V, v => v[2])].push(offsets.LV + vec.argmax(LV_V, v => v[2]));
-            this.adj[offsets.LV + vec.argmax(LV_V, v => v[2])].push(offsets.LA + vec.argmin(LA_V, v => v[2]));
+            geom.edges.forEach(([i,j]) => {
+                this.adj[i].push(j);
+                this.adj[j].push(i);
+            });
 
-            this.meta = { n, offsets };
+            this.meta = { n: 3, offsets }; // 3 nodes per chamber
         }
     }
 

@@ -63,7 +63,7 @@ If double-clicking doesn't work:
 ## 📊 Features
 
 ### Core Simulation
-- **4-Chamber Heart Model**: 48 nodes (12 per chamber)
+- **4-Chamber Heart Model**: Single icosahedron with 12 nodes (3 per chamber)
 - **FitzHugh-Nagumo Dynamics**: Realistic electrical coupling
 - **SA Node Pacemaker**: Simulated at Right Atrium
 - **Real-time Physics**: 5ms timestep integration
@@ -110,7 +110,7 @@ I₀(SA) = base_I₀ - (MAP_error × 0.002 × sensitivity)
 - **60 FPS rendering** with smooth animations
 - **200 data points** in telemetry charts
 - **500 samples** in export buffer
-- **Real-time computation** of 48-node network
+- **Real-time computation** of 12-node network
 
 ## 📦 File Structure
 
