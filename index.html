@@ -303,6 +303,28 @@ window.onload = function() {
         return { vertices, faces };
     }
 
+    function hslToRgb(h, s, l) {
+        let r, g, b;
+        if (s === 0) {
+            r = g = b = l;
+        } else {
+            const hue2rgb = (p, q, t) => {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1/6) return p + (q - p) * 6 * t;
+                if (t < 1/2) return q;
+                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                return p;
+            };
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            const p = 2 * l - q;
+            r = hue2rgb(p, q, h + 1/3);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1/3);
+        }
+        return [Math.floor(r * 255), Math.floor(g * 255), Math.floor(b * 255)];
+    }
+
     class AlievPanfilov {
       constructor(size = 50, dt = 0.01) {
         this.size = size;
@@ -507,10 +529,10 @@ window.onload = function() {
         scene.add(particlePoints);
         particlePoints.visible = false;
 
-        // Initialize blood cells (RBCs) as small red spheres
+        // Initialize blood cells (RBCs) as small red spheres - increased to 200 for better visualization
         bloodCellGeometry = new THREE.SphereGeometry(0.02, 8, 8);
         bloodCellMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-        for (let i = 0; i < 50; i++) {
+        for (let i = 0; i < 200; i++) {
             const cell = new THREE.Mesh(bloodCellGeometry, bloodCellMaterial);
             cell.visible = false;
             scene.add(cell);
@@ -730,13 +752,21 @@ window.onload = function() {
                 for (let j = 0; j < 50; j++) {
                     const val = u[i * 50 + j];
                     const idx = (i * 50 + j) * 4;
-                    const r = Math.floor(255 * val);
-                    const g = 0;
-                    const b = Math.floor(255 * (1 - val));
-                    imageData.data[idx] = r;
-                    imageData.data[idx + 1] = g;
-                    imageData.data[idx + 2] = b;
+                    // Enhanced shading: Use HSL for better gradient, add depth via brightness
+                    const hue = (1 - val) * 240 / 360; // Blue (240) to red (0)
+                    const saturation = 1;
+                    const lightness = 0.5 + val * 0.3; // Brighter for high values (depth effect)
+                    const rgb = hslToRgb(hue, saturation, lightness);
+                    imageData.data[idx] = rgb[0];
+                    imageData.data[idx + 1] = rgb[1];
+                    imageData.data[idx + 2] = rgb[2];
                     imageData.data[idx + 3] = 255;
+                    // Add simple contour lines (edge detection proxy)
+                    if (i > 0 && Math.abs(val - u[(i-1)*50 + j]) > 0.2) {
+                        imageData.data[idx] = 255; // White contour
+                        imageData.data[idx + 1] = 255;
+                        imageData.data[idx + 2] = 255;
+                    }
                 }
             }
             crossSectionCtx.putImageData(imageData, 0, 0);
