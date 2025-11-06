@@ -211,6 +211,11 @@ window.onload = function() {
     let crossSectionPlane, crossSectionTexture, crossSectionCanvas, crossSectionCtx, isCrossSection = false;
     let isColorCoded = true, isFlowViz = false, flowArrows = [];
     let isParticleTrails = false, particles = [], particleMaterial, particleGeometry, particlePoints;
+    let circulationPaths = [
+        { points: [new THREE.Vector3(-0.5, 0.5, 0), new THREE.Vector3(-0.5, -0.5, 0), new THREE.Vector3(0.5, -0.5, 0), new THREE.Vector3(0.5, 0.5, 0)] }, // Figure-8 LA→LV→Aorta→Body
+        { points: [new THREE.Vector3(0.5, 0.5, 0), new THREE.Vector3(0.5, -0.5, 0), new THREE.Vector3(-0.5, -0.5, 0), new THREE.Vector3(-0.5, 0.5, 0)] }, // Reverse path RA→RV→Pulm→Lungs
+        { points: [new THREE.Vector3(0, 0.8, 0), new THREE.Vector3(-0.8, 0, 0), new THREE.Vector3(0, -0.8, 0), new THREE.Vector3(0.8, 0, 0)] }  // Circular systemic loop
+    ];
     let isBloodFlow = false;
     let isCfd = false, cfdPlane, cfdVelocityTexture, cfdPressureTexture, cfdRendererTargetA, cfdRendererTargetB;
     let cfdAdvectionMaterial, cfdDiffusionMaterial, cfdProjectionMaterial, cfdDisplayMaterial;
@@ -482,7 +487,17 @@ window.onload = function() {
         particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         particleMaterial = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.05, transparent: true, opacity: 0.6 });
         particlePoints = new THREE.Points(particleGeometry, particleMaterial);
-        particles = velocities;
+
+        // Initialize particle data with circulation path assignments
+        particles = [];
+        for (let i = 0; i < numParticles; i++) {
+            particles.push({
+                pathIndex: Math.floor(Math.random() * circulationPaths.length),
+                pathProgress: Math.random(), // Position along path (0-1)
+                velocity: new THREE.Vector3(velocities[i * 3], velocities[i * 3 + 1], velocities[i * 3 + 2])
+            });
+        }
+
         scene.add(particlePoints);
         particlePoints.visible = false;
 
@@ -761,13 +776,45 @@ window.onload = function() {
             const shearProxy = model.getShearProxy();
             const modelTime = model.time || 0;
 
-            for (let i = 0; i < positions.length / 3; i++) {
+            for (let i = 0; i < particles.length; i++) {
                 const idx = i * 3;
+                const particle = particles[i];
 
-                // Enhanced velocity calculation with blood flow physics
-                let velocityX = particles[idx] * (1 + avgU * 2);
-                let velocityY = particles[idx + 1] * (1 + avgU * 2);
-                let velocityZ = particles[idx + 2] * (1 + avgU * 2);
+                // Get circulation path for this particle
+                const path = circulationPaths[particle.pathIndex];
+                const pathPoints = path.points;
+
+                // Catmull-Rom spline interpolation for smooth curves
+                const numSegments = pathPoints.length;
+                particle.pathProgress += 0.005 * (1 + avgU); // Progress along path influenced by potential
+                particle.pathProgress %= 1.0; // Loop back
+
+                const segmentT = particle.pathProgress * numSegments;
+                const segmentIndex = Math.floor(segmentT);
+                const t = segmentT - segmentIndex;
+
+                // Get 4 points for Catmull-Rom spline (p0, p1, p2, p3)
+                const p0 = pathPoints[(segmentIndex - 1 + numSegments) % numSegments];
+                const p1 = pathPoints[segmentIndex % numSegments];
+                const p2 = pathPoints[(segmentIndex + 1) % numSegments];
+                const p3 = pathPoints[(segmentIndex + 2) % numSegments];
+
+                // Catmull-Rom interpolation
+                const t2 = t * t;
+                const t3 = t2 * t;
+                const targetPos = new THREE.Vector3(
+                    0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+                    0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+                    0.5 * ((2 * p1.z) + (-p0.z + p2.z) * t + (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * t2 + (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * t3)
+                );
+
+                // Calculate velocity direction along path
+                const pathVelocity = new THREE.Vector3().subVectors(p2, p1).normalize();
+
+                // Blend path-guided motion with potential-driven deviation
+                let velocityX = particle.velocity.x * 0.9 + pathVelocity.x * 0.1;
+                let velocityY = particle.velocity.y * 0.9 + pathVelocity.y * 0.1;
+                let velocityZ = particle.velocity.z * 0.9 + pathVelocity.z * 0.1;
 
                 if (isBloodFlow) {
                     // Add time-based pulsatile flow
@@ -778,10 +825,22 @@ window.onload = function() {
                     velocityZ += Math.cos(sync.getPhase(0)) * 0.05 * (1 + SimConfig.rsa);
                 }
 
-                // Update particle positions based on enhanced velocities
-                positions[idx] += velocityX;
-                positions[idx + 1] += velocityY;
-                positions[idx + 2] += velocityZ;
+                // Update particle velocity
+                particle.velocity.set(velocityX, velocityY, velocityZ);
+
+                // Set position with path guidance + potential deviation
+                const currentPos = new THREE.Vector3(positions[idx], positions[idx + 1], positions[idx + 2]);
+                currentPos.lerp(targetPos, 0.3); // Lerp towards path position
+
+                // Add potential-driven deviation
+                const gridPosI = Math.floor((currentPos.y + 2) / 4 * model.size) % model.size;
+                const gridPosJ = Math.floor((currentPos.x + 2) / 4 * model.size) % model.size;
+                const uHere = model.u[model.idx(gridPosI, gridPosJ)] || 0;
+                currentPos.add(particle.velocity.clone().multiplyScalar(0.05 + uHere * 0.1));
+
+                positions[idx] = currentPos.x;
+                positions[idx + 1] = currentPos.y;
+                positions[idx + 2] = currentPos.z;
 
                 // Valve interactions - particles bounce off closed valves
                 if (isValveInteract) {
