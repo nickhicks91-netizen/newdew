@@ -236,6 +236,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 window.onload = function() {
+    const canvasContainer = document.getElementById('canvasContainer');
     let scene, camera, renderer, controls, nodeMesh, telemetryChart, phantomFlowField;
     let crossSectionPlane, crossSectionTexture, crossSectionCanvas, crossSectionCtx, isCrossSection = false;
     let animationFrameId, lastUpdateTime = 0;
@@ -478,7 +479,7 @@ window.onload = function() {
     }
 
     function initChart() {
-        telemetryChart = new Chart(telemetryCanvas, {
+        telemetryChart = new Chart(dom.telemetryCanvas, {
             type: 'line',
             data: { labels: [], datasets: [
                 { label: 'ECG', data: [], borderColor: '#f87171', borderWidth: 2, pointRadius: 0 },
@@ -513,7 +514,9 @@ window.onload = function() {
             const phase = sync.getPhase(quadIdx);
             const pulsation = 1 + 0.2 * Math.sin(phase) * (1 + 0.5 * avgU);
 
-            dummy.position.fromArray(geo.vertices[i]);
+            // Scale vertices to make them visible (icosahedron normalized to unit sphere)
+            const scaledPos = geo.vertices[i].map(v => v * 2.0); // Scale up by 2x
+            dummy.position.fromArray(scaledPos);
             dummy.scale.set(pulsation, pulsation, pulsation);
             dummy.updateMatrix();
             nodeMesh.setMatrixAt(i, dummy.matrix);
@@ -706,7 +709,7 @@ window.onload = function() {
         phantomFlowField = null;
         if (nodeMesh) scene.remove(nodeMesh);
         const geo = icosahedronGeometry();
-        const sphereGeo = new THREE.SphereGeometry(0.1, 16, 12);
+        const sphereGeo = new THREE.SphereGeometry(0.2, 16, 12);
         const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
         nodeMesh = new THREE.InstancedMesh(sphereGeo, mat, geo.vertices.length);
         scene.add(nodeMesh);
