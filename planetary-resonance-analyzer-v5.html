@@ -635,6 +635,9 @@ footer {
       <div class="checkbox-item">
         <input type="checkbox" id="standingWaveCheck">
         <label for="standingWaveCheck" style="margin:0;">Standing Wave Nodes</label>
+        <span class="tooltip">ℹ️
+          <span class="tooltiptext">Shows spherical shells at node positions (λ/2 intervals). Pattern changes with frequency.</span>
+        </span>
       </div>
       <div class="checkbox-item">
         <input type="checkbox" id="heatMapCheck">
@@ -781,8 +784,8 @@ footer {
       <strong>📏 Measurement Tools:</strong><br>
       • Distance: Click 2 points<br>
       • Angle: Click 3 points<br>
-      • Field strength: Hover cursor<br>
-      • Cross-section: Slice planet<br>
+      • Field strength: Hover (nT)<br>
+      • Cross-section: True clipping<br>
       <br>
       <strong>🎬 View Presets:</strong><br>
       • Equatorial, Polar, Side views<br>
@@ -957,6 +960,7 @@ const planetaryData = {
 let scene, camera, renderer, controls, planetMesh, ringMeshes = [];
 let labelSprites = [];
 let schumannWaves = [];
+let standingWaveNodes = [];
 let magnetosphereLines = [];
 let auroraParticles = null;
 let heatMapOverlay = null;
@@ -990,6 +994,11 @@ let mouse = new THREE.Vector2();
 let rotationLocks = { x: false, y: false, z: false };
 let snapAngle = 0; // 0 = off, 15, 30, 45
 let lastCameraPosition = null;
+
+// Event listener cleanup tracking
+let mouseClickListener = null;
+let mouseMoveListener = null;
+let resizeListener = null;
 
 // ========== UTILITY FUNCTIONS ==========
 
@@ -1055,6 +1064,62 @@ function sensitivitySweep(altitudeList, freqMin, freqMax, step = DEFAULT_FREQUEN
  */
 function createSchumannWaves() {
   createInterferenceWaves();
+}
+
+/**
+ * Create standing wave nodes visualization
+ * Shows spherical shells at node positions (destructive interference)
+ */
+function createStandingWaveNodes() {
+  // Clean up existing nodes
+  standingWaveNodes.forEach(node => {
+    scene.remove(node);
+    node.geometry.dispose();
+    node.material.dispose();
+  });
+  standingWaveNodes = [];
+
+  if (!formationsEnabled.standingWave) return;
+
+  // Calculate wavelength from frequency
+  const wavelength_m = SPEED_OF_LIGHT_M_S / currentFrequency;
+  const bodyData = planetaryData[bodySelect.value];
+  const radius_m = bodyData.radius_km * 1000;
+
+  // Calculate number of nodes that fit in the cavity
+  // Nodes occur at integer multiples of λ/2
+  const maxRadius = radius_m * 1.5; // Show nodes up to 1.5x planet radius
+  const numNodes = Math.floor(maxRadius / (wavelength_m / 2));
+
+  // Limit to reasonable number for performance
+  const nodesToShow = Math.min(numNodes, 8);
+
+  for (let n = 1; n <= nodesToShow; n++) {
+    const nodeRadius_m = n * (wavelength_m / 2);
+    const nodeRadius_normalized = 1 + (nodeRadius_m - radius_m) / radius_m;
+
+    // Only show nodes outside planet surface
+    if (nodeRadius_normalized > 1.05) {
+      const geometry = new THREE.SphereGeometry(
+        nodeRadius_normalized,
+        SCHUMANN_WAVE_SEGMENTS,
+        SCHUMANN_WAVE_SEGMENTS / 2
+      );
+
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xff00ff, // Magenta for nodes (opposite of cyan waves)
+        transparent: true,
+        opacity: 0.12,
+        wireframe: true,
+        side: THREE.DoubleSide
+      });
+
+      const node = new THREE.Mesh(geometry, material);
+      node.userData.nodeNumber = n;
+      scene.add(node);
+      standingWaveNodes.push(node);
+    }
+  }
 }
 
 /**
@@ -1471,6 +1536,7 @@ function handleMeasurementClick(event) {
 
 /**
  * Update field strength display on mouse move
+ * Handles magnetic and non-magnetic bodies with proper unit conversion
  */
 function updateFieldStrength(event) {
   if (!fieldStrengthEnabled || !planetMesh) return;
@@ -1486,20 +1552,46 @@ function updateFieldStrength(event) {
     const point = intersects[0].point;
     const distance = point.length();
     const bodyData = planetaryData[bodySelect.value];
-
-    // Calculate simulated field strength (1/r^2 law)
-    const fieldStrength = (bodyData.magneticFieldStrength || 1.0) / (distance * distance);
+    const altitude_km = (distance - 1) * bodyData.radius_km;
     const latitude = Math.asin(point.y / distance) * (180 / Math.PI);
+    const longitude = Math.atan2(point.z, point.x) * (180 / Math.PI);
+
+    let fieldInfo = '';
+
+    if (bodyData.hasMagnetosphere && bodyData.magneticFieldStrength) {
+      // Magnetic body: calculate field strength in nT
+      // Earth's surface field ~30,000-60,000 nT (dipole)
+      // Using simplified dipole: B(r,θ) = B0/r³ * sqrt(1 + 3cos²θ)
+      const latRad = latitude * (Math.PI / 180);
+      const cosTerm = Math.cos(latRad);
+      const dipoleFactor = Math.sqrt(1 + 3 * cosTerm * cosTerm);
+
+      // Normalize to Earth (fieldStrength=1.0 → ~50,000 nT at surface)
+      const surfaceField_nT = bodyData.magneticFieldStrength * 50000;
+      const fieldStrength_nT = surfaceField_nT / Math.pow(distance, 3) * dipoleFactor;
+
+      fieldInfo = `<strong>Magnetic Field:</strong> ${fieldStrength_nT.toFixed(1)} nT<br>` +
+                  `<strong>Type:</strong> Dipole field`;
+    } else {
+      // Non-magnetic body: show EM wave energy instead
+      const {ratio, delta} = computeResonanceDelta(altitude_km, currentFrequency);
+      const resonanceQuality = delta < 0.1 ? 'Strong' : delta < 0.25 ? 'Moderate' : 'Weak';
+
+      fieldInfo = `<strong>EM Resonance:</strong> ${resonanceQuality} (δ=${delta.toFixed(4)})<br>` +
+                  `<strong>Harmonic:</strong> n=${Math.round(ratio)}`;
+    }
 
     document.getElementById('measurementDisplay').style.display = 'block';
     document.getElementById('measurementText').innerHTML =
-      `<strong>Position:</strong> r=${distance.toFixed(3)}, lat=${latitude.toFixed(1)}°<br>` +
-      `<strong>Field Strength:</strong> ${fieldStrength.toFixed(4)} (relative)`;
+      `<strong>Position:</strong> Alt=${altitude_km.toFixed(1)} km, Lat=${latitude.toFixed(1)}°<br>` +
+      `<strong>Coords:</strong> Lon=${longitude.toFixed(1)}°<br>` +
+      fieldInfo;
   }
 }
 
 /**
  * Create or update cross-section plane
+ * Uses THREE.js clipping planes to actually slice the planet mesh
  */
 function updateCrossSectionPlane(position) {
   if (crossSectionPlane) {
@@ -1510,12 +1602,34 @@ function updateCrossSectionPlane(position) {
 
   if (!document.getElementById('crossSectionCheck').checked) {
     crossSectionPlane = null;
+    // Disable clipping
+    if (renderer) renderer.localClippingEnabled = false;
+    if (planetMesh && planetMesh.material) {
+      planetMesh.material.clippingPlanes = [];
+      planetMesh.material.needsUpdate = true;
+    }
     return;
   }
 
   // Position from -1 to +1
   const yPos = (position / 50) - 1;
 
+  // Create clipping plane (normal pointing up, position at yPos)
+  const clippingPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -yPos);
+
+  // Enable renderer clipping
+  if (renderer) {
+    renderer.localClippingEnabled = true;
+  }
+
+  // Apply clipping to planet mesh
+  if (planetMesh && planetMesh.material) {
+    planetMesh.material.clippingPlanes = [clippingPlane];
+    planetMesh.material.clipShadows = true;
+    planetMesh.material.needsUpdate = true;
+  }
+
+  // Create visual indicator plane
   const geometry = new THREE.PlaneGeometry(3, 3);
   const material = new THREE.MeshBasicMaterial({
     color: 0x00ff00,
@@ -1648,14 +1762,33 @@ function createInterferenceWaves() {
 // ========== 3D VISUALIZATION ==========
 
 function cleanup3D() {
+  // Dispose textures
+  if (heatMapOverlay) {
+    heatMapOverlay.dispose();
+    heatMapOverlay = null;
+  }
+
+  // Dispose renderer
   if (renderer) {
     renderer.dispose();
     renderer.forceContextLoss();
+    renderer = null;
   }
+
+  // Clean up scene objects and their resources
   if (scene) {
     scene.traverse(obj => {
-      if (obj.geometry) obj.geometry.dispose();
+      if (obj.geometry) {
+        obj.geometry.dispose();
+      }
       if (obj.material) {
+        // Dispose material maps/textures
+        if (obj.material.map) obj.material.map.dispose();
+        if (obj.material.emissiveMap) obj.material.emissiveMap.dispose();
+        if (obj.material.normalMap) obj.material.normalMap.dispose();
+        if (obj.material.bumpMap) obj.material.bumpMap.dispose();
+
+        // Dispose material itself
         if (Array.isArray(obj.material)) {
           obj.material.forEach(mat => mat.dispose());
         } else {
@@ -1665,14 +1798,28 @@ function cleanup3D() {
     });
     scene.clear();
   }
+
+  // Remove event listeners
+  if (mouseClickListener && renderer && renderer.domElement) {
+    renderer.domElement.removeEventListener('click', mouseClickListener);
+    mouseClickListener = null;
+  }
+  if (mouseMoveListener && renderer && renderer.domElement) {
+    renderer.domElement.removeEventListener('mousemove', mouseMoveListener);
+    mouseMoveListener = null;
+  }
+
+  // Clear arrays
   ringMeshes = [];
   labelSprites = [];
   schumannWaves = [];
+  standingWaveNodes = [];
   magnetosphereLines = [];
   auroraParticles = null;
-  heatMapOverlay = null;
   clearMeasurement();
   crossSectionPlane = null;
+  planetMesh = null;
+  controls = null;
 }
 
 function onWindowResize() {
@@ -1693,11 +1840,27 @@ function init3D(bodyData) {
 
     cleanup3D();
 
+    // Check for WebGL support
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) {
+      throw new Error('WebGL not supported by your browser. Please use a modern browser like Chrome, Firefox, or Edge.');
+    }
+
     scene = new THREE.Scene();
     const aspect = container.clientWidth / container.clientHeight;
     camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
 
-    renderer = new THREE.WebGLRenderer({antialias: true, alpha: true, preserveDrawingBuffer: true});
+    try {
+      renderer = new THREE.WebGLRenderer({antialias: true, alpha: true, preserveDrawingBuffer: true});
+    } catch (e) {
+      throw new Error('Failed to create WebGL renderer: ' + e.message);
+    }
+
+    if (!renderer) {
+      throw new Error('WebGL renderer failed to initialize');
+    }
+
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
@@ -1722,8 +1885,16 @@ function init3D(bodyData) {
 
     // Create planet
     const geometry = new THREE.SphereGeometry(1, SPHERE_SEGMENTS, SPHERE_SEGMENTS);
-    let material;
+    let material = new THREE.MeshStandardMaterial({
+      color: bodyData.color,
+      metalness: 0.2,
+      roughness: 0.7
+    });
 
+    planetMesh = new THREE.Mesh(geometry, material);
+    scene.add(planetMesh);
+
+    // Load texture asynchronously with error handling
     if (bodyData.texture) {
       const textureLoader = new THREE.TextureLoader();
       textureLoader.setCrossOrigin('anonymous');
@@ -1731,30 +1902,26 @@ function init3D(bodyData) {
       textureLoader.load(
         bodyData.texture,
         (texture) => {
-          planetMesh.material.map = texture;
-          planetMesh.material.needsUpdate = true;
+          // Success: apply texture
+          if (planetMesh && planetMesh.material) {
+            planetMesh.material.map = texture;
+            planetMesh.material.needsUpdate = true;
+          }
         },
-        undefined,
+        (progress) => {
+          // Progress callback (optional)
+          if (progress.lengthComputable) {
+            const percent = (progress.loaded / progress.total * 100).toFixed(0);
+            console.log(`Loading texture: ${percent}%`);
+          }
+        },
         (error) => {
-          console.warn('Texture loading failed, using color fallback');
+          // Error: fallback to color already set
+          console.warn(`Texture loading failed for ${bodyData.texture}, using color fallback:`, error);
+          showMessage(`Using color fallback for ${bodySelect.value} (texture unavailable)`, 'error');
         }
       );
-
-      material = new THREE.MeshStandardMaterial({
-        color: bodyData.color,
-        metalness: 0.2,
-        roughness: 0.7
-      });
-    } else {
-      material = new THREE.MeshStandardMaterial({
-        color: bodyData.color,
-        metalness: 0.2,
-        roughness: 0.8
-      });
     }
-
-    planetMesh = new THREE.Mesh(geometry, material);
-    scene.add(planetMesh);
 
     // Create boundary rings (always show these)
     const showLabels = document.getElementById('showLabelsCheck').checked;
@@ -1790,6 +1957,7 @@ function init3D(bodyData) {
 
     // Create formations
     createSchumannWaves();
+    createStandingWaveNodes();
     createRings(bodyData);
     createMagnetosphere(bodyData);
     createAurora(bodyData);
@@ -1862,6 +2030,11 @@ function runAnalysis(frequency = null) {
       return null;
     }
 
+    if (!bodyData.boundaries || bodyData.boundaries.length === 0) {
+      showError("No boundaries defined for " + bodyName);
+      return null;
+    }
+
     const altitudeList = bodyData.boundaries.map(b => b.h_km);
     const useFreq = frequency || currentFrequency;
 
@@ -1908,6 +2081,11 @@ function runFullAnalysis() {
 
     if (!bodyData) {
       showError("Invalid celestial body selected");
+      return null;
+    }
+
+    if (!bodyData.boundaries || bodyData.boundaries.length === 0) {
+      showError("No boundaries defined for " + bodyName);
       return null;
     }
 
@@ -2125,7 +2303,15 @@ function exportPDF(data) {
   }
 
   try {
+    if (typeof window.jspdf === 'undefined') {
+      throw new Error('jsPDF library not loaded. Check your internet connection.');
+    }
+
     const {jsPDF} = window.jspdf;
+    if (!jsPDF) {
+      throw new Error('jsPDF not available');
+    }
+
     const doc = new jsPDF();
 
     doc.setFontSize(16);
@@ -2212,9 +2398,12 @@ function setupEventListeners() {
 
   freqSlider.onchange = () => {
     lastAnalysisData = runAnalysis(currentFrequency);
-    // Update heat map if enabled - pattern changes with frequency
+    // Update formations that depend on frequency
     if (formationsEnabled.heatMap && planetMesh) {
       createHeatMap();
+    }
+    if (formationsEnabled.standingWave) {
+      createStandingWaveNodes();
     }
   };
 
@@ -2242,6 +2431,7 @@ function setupEventListeners() {
 
   document.getElementById('standingWaveCheck').onchange = (e) => {
     formationsEnabled.standingWave = e.target.checked;
+    createStandingWaveNodes();
   };
 
   document.getElementById('heatMapCheck').onchange = (e) => {
@@ -2327,6 +2517,10 @@ function setupEventListeners() {
   document.getElementById('freq2Slider').oninput = (e) => {
     secondaryFrequency = parseFloat(e.target.value);
     document.getElementById('freq2Value').textContent = secondaryFrequency.toFixed(2) + ' Hz';
+    // Realtime update if interference is enabled
+    if (formationsEnabled.interference) {
+      createInterferenceWaves();
+    }
   };
 
   document.getElementById('freq2Slider').onchange = (e) => {
@@ -2359,19 +2553,26 @@ function setupEventListeners() {
   document.getElementById("clearHistoryBtn").onclick = clearHistory;
 
   // Window resize
-  window.addEventListener('resize', onWindowResize);
+  resizeListener = onWindowResize;
+  window.addEventListener('resize', resizeListener);
 
   // Mouse events for measurements (add listeners after renderer is created)
   setTimeout(() => {
     if (renderer && renderer.domElement) {
-      renderer.domElement.addEventListener('click', handleMeasurementClick);
-      renderer.domElement.addEventListener('mousemove', updateFieldStrength);
+      mouseClickListener = handleMeasurementClick;
+      mouseMoveListener = updateFieldStrength;
+      renderer.domElement.addEventListener('click', mouseClickListener);
+      renderer.domElement.addEventListener('mousemove', mouseMoveListener);
     }
   }, 1000);
 
   // Cleanup
   window.addEventListener('beforeunload', () => {
     cleanup3D();
+    // Remove window resize listener
+    if (resizeListener) {
+      window.removeEventListener('resize', resizeListener);
+    }
   });
 }
 
