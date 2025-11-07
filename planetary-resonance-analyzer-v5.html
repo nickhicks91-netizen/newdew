@@ -1912,6 +1912,9 @@ function init3D(bodyData) {
       controls.dampingFactor = 0.05;
       controls.enablePan = true;
       controls.autoRotate = false; // Manual controls only
+      controls.rotateSpeed = 0.5; // Reduced from default 1.0 for less sensitive rotation
+      controls.panSpeed = 0.5; // Also reduce pan speed for consistency
+      controls.zoomSpeed = 0.8; // Slightly reduce zoom sensitivity
       controls.minDistance = 1.5;
       controls.maxDistance = 10;
     } else {
