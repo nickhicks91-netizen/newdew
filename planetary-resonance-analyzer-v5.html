@@ -421,6 +421,8 @@ footer {
 "use strict";
 
 // ========== CONSTANTS ==========
+// Note: Three.js r157 deprecation warnings are expected and don't affect functionality
+// These will be addressed in a future migration to Three.js r160+ with ES modules
 const SPEED_OF_LIGHT_M_S = 2.99792458e8;
 const MEASUREMENT_CRITERION = 0.25;
 const DEFAULT_FREQUENCY_STEP = 0.05;
@@ -466,7 +468,7 @@ const planetaryData = {
   },
   "Saturn": {
     radius_km: 58232,
-    texture: "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/saturn.jpg",
+    texture: null, // Use procedural color - texture URL currently unavailable
     color: 0xFAD5A5,
     hasRings: true,
     ringData: {
