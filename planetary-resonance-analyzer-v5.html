@@ -659,10 +659,71 @@ footer {
       </div>
     </div>
 
+    <h3>📏 Measurement Tools</h3>
+    <div class="formation-group">
+      <h4>🔍 Analysis Tools</h4>
+      <button id="distanceMeasureBtn" class="secondary">📏 Measure Distance</button>
+      <button id="angleMeasureBtn" class="secondary">📐 Measure Angle</button>
+      <div class="checkbox-item">
+        <input type="checkbox" id="fieldStrengthCheck">
+        <label for="fieldStrengthCheck" style="margin:0;">Show Field Strength</label>
+      </div>
+      <label for="crossSectionSlider" style="margin-top: 10px;">Cross-Section Position</label>
+      <input type="range" id="crossSectionSlider" min="0" max="100" value="50" disabled>
+      <div class="checkbox-item">
+        <input type="checkbox" id="crossSectionCheck">
+        <label for="crossSectionCheck" style="margin:0;">Enable Cross-Section</label>
+      </div>
+    </div>
+    <div id="measurementDisplay" style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; margin: 10px 0; min-height: 40px; font-size: 0.9em; display: none;">
+      <div id="measurementText">Click to measure...</div>
+    </div>
+
     <h3>🎬 View Controls</h3>
+    <div class="formation-group">
+      <h4>📍 Preset Views</h4>
+      <div class="controls-grid">
+        <button id="viewEquatorialBtn" class="secondary">🌍 Equatorial</button>
+        <button id="viewPolarNorthBtn" class="secondary">⬆️ Polar N</button>
+        <button id="viewPolarSouthBtn" class="secondary">⬇️ Polar S</button>
+        <button id="viewSideBtn" class="secondary">↔️ Side</button>
+      </div>
+      <h4 style="margin-top: 15px;">🔒 Rotation Lock</h4>
+      <div class="checkbox-item">
+        <input type="checkbox" id="lockXCheck">
+        <label for="lockXCheck" style="margin:0;">Lock X-Axis</label>
+      </div>
+      <div class="checkbox-item">
+        <input type="checkbox" id="lockYCheck">
+        <label for="lockYCheck" style="margin:0;">Lock Y-Axis</label>
+      </div>
+      <div class="checkbox-item">
+        <input type="checkbox" id="lockZCheck">
+        <label for="lockZCheck" style="margin:0;">Lock Z-Axis</label>
+      </div>
+      <label for="snapAngleSelect" style="margin-top: 10px;">Snap-to-Angle</label>
+      <select id="snapAngleSelect">
+        <option value="0">Off</option>
+        <option value="15">15° increments</option>
+        <option value="30">30° increments</option>
+        <option value="45">45° increments</option>
+      </select>
+    </div>
     <div class="checkbox-item">
       <input type="checkbox" id="showLabelsCheck" checked>
       <label for="showLabelsCheck" style="margin:0;">Show Boundary Labels</label>
+    </div>
+
+    <h3>🌊 Wave Interference</h3>
+    <div class="formation-group">
+      <h4>⚡ Multi-Frequency Analysis</h4>
+      <div class="checkbox-item">
+        <input type="checkbox" id="interferenceCheck">
+        <label for="interferenceCheck" style="margin:0;">Enable Interference</label>
+      </div>
+      <label for="freq2Slider">Secondary Frequency (Hz)</label>
+      <input type="range" id="freq2Slider" min="1" max="500" step="0.1" value="14" disabled>
+      <div class="slider-value" id="freq2Value">14.00 Hz</div>
     </div>
 
     <button id="runBtn">🚀 Run Full Analysis</button>
@@ -714,7 +775,23 @@ footer {
       • Scroll to zoom<br>
       • Right-click + drag to pan<br>
       <br>
-      <strong>⚡ New in v5.0:</strong><br>
+      <strong>📏 Measurement Tools:</strong><br>
+      • Distance: Click 2 points<br>
+      • Angle: Click 3 points<br>
+      • Field strength: Hover cursor<br>
+      • Cross-section: Slice planet<br>
+      <br>
+      <strong>🎬 View Presets:</strong><br>
+      • Equatorial, Polar, Side views<br>
+      • Axis rotation locks<br>
+      • Snap-to-angle rotation<br>
+      <br>
+      <strong>🌊 Wave Interference:</strong><br>
+      • Dual-frequency analysis<br>
+      • Cyan = primary frequency<br>
+      • Magenta = secondary frequency<br>
+      <br>
+      <strong>⚡ v5.0 Features:</strong><br>
       • Animated Schumann waves<br>
       • Magnetosphere visualization<br>
       • Ring systems (Saturn, Jupiter)<br>
@@ -876,6 +953,7 @@ let heatMapOverlay = null;
 let lastAnalysisData = null;
 let analysisHistory = [];
 let currentFrequency = 7.83;
+let secondaryFrequency = 14.0;
 let animationTime = 0;
 
 // Formation toggle states
@@ -885,8 +963,23 @@ let formationsEnabled = {
   heatMap: false,
   rings: false,
   magnetosphere: false,
-  aurora: false
+  aurora: false,
+  interference: false
 };
+
+// Measurement state
+let measurementMode = null; // 'distance', 'angle', or null
+let measurementPoints = [];
+let measurementMarkers = [];
+let fieldStrengthEnabled = false;
+let crossSectionPlane = null;
+let raycaster = new THREE.Raycaster();
+let mouse = new THREE.Vector2();
+
+// View control state
+let rotationLocks = { x: false, y: false, z: false };
+let snapAngle = 0; // 0 = off, 15, 30, 45
+let lastCameraPosition = null;
 
 // ========== UTILITY FUNCTIONS ==========
 
@@ -948,32 +1041,10 @@ function sensitivitySweep(altitudeList, freqMin, freqMax, step = DEFAULT_FREQUEN
 
 /**
  * Create Schumann Resonance Wave visualization
+ * Now supports interference patterns
  */
 function createSchumannWaves() {
-  schumannWaves.forEach(wave => {
-    scene.remove(wave);
-    wave.geometry.dispose();
-    wave.material.dispose();
-  });
-  schumannWaves = [];
-
-  if (!formationsEnabled.schumann) return;
-
-  // Create multiple wave bands at different phases
-  for (let i = 0; i < 3; i++) {
-    const geometry = new THREE.SphereGeometry(1.05 + i * 0.02, SCHUMANN_WAVE_SEGMENTS, SCHUMANN_WAVE_SEGMENTS / 2);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
-      transparent: true,
-      opacity: 0.15,
-      wireframe: true,
-      side: THREE.DoubleSide
-    });
-    const wave = new THREE.Mesh(geometry, material);
-    wave.userData.phase = (i * Math.PI * 2) / 3;
-    scene.add(wave);
-    schumannWaves.push(wave);
-  }
+  createInterferenceWaves();
 }
 
 /**
@@ -1186,6 +1257,284 @@ function createTextSprite(text, color = '#ffffff') {
   return sprite;
 }
 
+// ========== MEASUREMENT TOOLS ==========
+
+/**
+ * Start distance measurement mode
+ */
+function startDistanceMeasurement() {
+  clearMeasurement();
+  measurementMode = 'distance';
+  document.getElementById('measurementDisplay').style.display = 'block';
+  document.getElementById('measurementText').textContent = 'Click two points to measure distance...';
+  showSuccess('Distance measurement active - click on the planet');
+}
+
+/**
+ * Start angle measurement mode
+ */
+function startAngleMeasurement() {
+  clearMeasurement();
+  measurementMode = 'angle';
+  document.getElementById('measurementDisplay').style.display = 'block';
+  document.getElementById('measurementText').textContent = 'Click three points to measure angle...';
+  showSuccess('Angle measurement active - click on the planet');
+}
+
+/**
+ * Clear current measurement
+ */
+function clearMeasurement() {
+  measurementMode = null;
+  measurementPoints = [];
+  measurementMarkers.forEach(marker => {
+    scene.remove(marker);
+    if (marker.geometry) marker.geometry.dispose();
+    if (marker.material) marker.material.dispose();
+  });
+  measurementMarkers = [];
+}
+
+/**
+ * Handle click for measurement
+ */
+function handleMeasurementClick(event) {
+  if (!measurementMode) return;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObject(planetMesh);
+
+  if (intersects.length > 0) {
+    const point = intersects[0].point;
+    measurementPoints.push(point);
+
+    // Add visual marker
+    const markerGeo = new THREE.SphereGeometry(0.03, 8, 8);
+    const markerMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const marker = new THREE.Mesh(markerGeo, markerMat);
+    marker.position.copy(point);
+    scene.add(marker);
+    measurementMarkers.push(marker);
+
+    if (measurementMode === 'distance' && measurementPoints.length === 2) {
+      const dist = measurementPoints[0].distanceTo(measurementPoints[1]);
+      const bodyData = planetaryData[bodySelect.value];
+      const distKm = dist * bodyData.radius_km;
+
+      // Add line between points
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(measurementPoints);
+      const lineMat = new THREE.LineBasicMaterial({ color: 0xff0000 });
+      const line = new THREE.Line(lineGeo, lineMat);
+      scene.add(line);
+      measurementMarkers.push(line);
+
+      document.getElementById('measurementText').innerHTML =
+        `<strong>Distance:</strong> ${dist.toFixed(4)} units (${distKm.toFixed(2)} km)<br>` +
+        `<small>Click "Measure Distance" to start new measurement</small>`;
+      measurementMode = null;
+    } else if (measurementMode === 'angle' && measurementPoints.length === 3) {
+      const v1 = new THREE.Vector3().subVectors(measurementPoints[0], measurementPoints[1]);
+      const v2 = new THREE.Vector3().subVectors(measurementPoints[2], measurementPoints[1]);
+      const angle = v1.angleTo(v2) * (180 / Math.PI);
+
+      // Add lines
+      const line1Geo = new THREE.BufferGeometry().setFromPoints([measurementPoints[0], measurementPoints[1]]);
+      const line2Geo = new THREE.BufferGeometry().setFromPoints([measurementPoints[1], measurementPoints[2]]);
+      const lineMat = new THREE.LineBasicMaterial({ color: 0xff0000 });
+      const line1 = new THREE.Line(line1Geo, lineMat);
+      const line2 = new THREE.Line(line2Geo, lineMat);
+      scene.add(line1);
+      scene.add(line2);
+      measurementMarkers.push(line1, line2);
+
+      document.getElementById('measurementText').innerHTML =
+        `<strong>Angle:</strong> ${angle.toFixed(2)}°<br>` +
+        `<small>Click "Measure Angle" to start new measurement</small>`;
+      measurementMode = null;
+    }
+  }
+}
+
+/**
+ * Update field strength display on mouse move
+ */
+function updateFieldStrength(event) {
+  if (!fieldStrengthEnabled || !planetMesh) return;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObject(planetMesh);
+
+  if (intersects.length > 0) {
+    const point = intersects[0].point;
+    const distance = point.length();
+    const bodyData = planetaryData[bodySelect.value];
+
+    // Calculate simulated field strength (1/r^2 law)
+    const fieldStrength = (bodyData.magneticFieldStrength || 1.0) / (distance * distance);
+    const latitude = Math.asin(point.y / distance) * (180 / Math.PI);
+
+    document.getElementById('measurementDisplay').style.display = 'block';
+    document.getElementById('measurementText').innerHTML =
+      `<strong>Position:</strong> r=${distance.toFixed(3)}, lat=${latitude.toFixed(1)}°<br>` +
+      `<strong>Field Strength:</strong> ${fieldStrength.toFixed(4)} (relative)`;
+  }
+}
+
+/**
+ * Create or update cross-section plane
+ */
+function updateCrossSectionPlane(position) {
+  if (crossSectionPlane) {
+    scene.remove(crossSectionPlane);
+    crossSectionPlane.geometry.dispose();
+    crossSectionPlane.material.dispose();
+  }
+
+  if (!document.getElementById('crossSectionCheck').checked) {
+    crossSectionPlane = null;
+    return;
+  }
+
+  // Position from -1 to +1
+  const yPos = (position / 50) - 1;
+
+  const geometry = new THREE.PlaneGeometry(3, 3);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x00ff00,
+    transparent: true,
+    opacity: 0.3,
+    side: THREE.DoubleSide
+  });
+  crossSectionPlane = new THREE.Mesh(geometry, material);
+  crossSectionPlane.position.y = yPos;
+  crossSectionPlane.rotation.x = Math.PI / 2;
+  scene.add(crossSectionPlane);
+}
+
+// ========== VIEW PRESETS & CONTROLS ==========
+
+/**
+ * Set camera to preset views
+ */
+function setViewPreset(preset) {
+  if (!camera || !controls) return;
+
+  const distance = 3;
+  switch (preset) {
+    case 'equatorial':
+      camera.position.set(distance, 0, 0);
+      break;
+    case 'polarNorth':
+      camera.position.set(0, distance, 0);
+      break;
+    case 'polarSouth':
+      camera.position.set(0, -distance, 0);
+      break;
+    case 'side':
+      camera.position.set(0, 0, distance);
+      break;
+  }
+
+  camera.lookAt(0, 0, 0);
+  controls.target.set(0, 0, 0);
+  controls.update();
+  showSuccess(`View: ${preset}`);
+}
+
+/**
+ * Apply rotation locks and snap-to-angle
+ */
+function applyViewConstraints() {
+  if (!controls || !camera) return;
+
+  // Apply rotation locks
+  if (rotationLocks.x) {
+    controls.minPolarAngle = controls.maxPolarAngle = controls.getPolarAngle();
+  } else {
+    controls.minPolarAngle = 0;
+    controls.maxPolarAngle = Math.PI;
+  }
+
+  if (rotationLocks.y) {
+    const currentAzimuth = controls.getAzimuthalAngle();
+    controls.minAzimuthAngle = controls.maxAzimuthAngle = currentAzimuth;
+  } else {
+    controls.minAzimuthAngle = -Infinity;
+    controls.maxAzimuthAngle = Infinity;
+  }
+
+  // Apply snap-to-angle
+  if (snapAngle > 0 && lastCameraPosition) {
+    const currentAzimuth = controls.getAzimuthalAngle();
+    const snapRad = (snapAngle * Math.PI) / 180;
+    const snappedAzimuth = Math.round(currentAzimuth / snapRad) * snapRad;
+
+    if (Math.abs(currentAzimuth - snappedAzimuth) < snapRad / 4) {
+      controls.minAzimuthAngle = controls.maxAzimuthAngle = snappedAzimuth;
+      setTimeout(() => {
+        if (!rotationLocks.y) {
+          controls.minAzimuthAngle = -Infinity;
+          controls.maxAzimuthAngle = Infinity;
+        }
+      }, 100);
+    }
+  }
+
+  lastCameraPosition = camera.position.clone();
+}
+
+// ========== WAVE INTERFERENCE ==========
+
+/**
+ * Update Schumann waves with interference patterns
+ */
+function createInterferenceWaves() {
+  schumannWaves.forEach(wave => {
+    scene.remove(wave);
+    wave.geometry.dispose();
+    wave.material.dispose();
+  });
+  schumannWaves = [];
+
+  if (!formationsEnabled.schumann) return;
+
+  const numWaves = formationsEnabled.interference ? 6 : 3;
+
+  for (let i = 0; i < numWaves; i++) {
+    const isSecondary = formationsEnabled.interference && i >= 3;
+    const baseRadius = 1.05 + (i % 3) * 0.02;
+
+    const geometry = new THREE.SphereGeometry(
+      baseRadius,
+      SCHUMANN_WAVE_SEGMENTS,
+      SCHUMANN_WAVE_SEGMENTS / 2
+    );
+
+    const material = new THREE.MeshBasicMaterial({
+      color: isSecondary ? 0xff00ff : 0x00ffff,
+      transparent: true,
+      opacity: 0.15,
+      wireframe: true,
+      side: THREE.DoubleSide
+    });
+
+    const wave = new THREE.Mesh(geometry, material);
+    wave.userData.phase = ((i % 3) * Math.PI * 2) / 3;
+    wave.userData.frequency = isSecondary ? secondaryFrequency : currentFrequency;
+    wave.userData.isSecondary = isSecondary;
+    scene.add(wave);
+    schumannWaves.push(wave);
+  }
+}
+
 // ========== 3D VISUALIZATION ==========
 
 function cleanup3D() {
@@ -1212,6 +1561,8 @@ function cleanup3D() {
   magnetosphereLines = [];
   auroraParticles = null;
   heatMapOverlay = null;
+  clearMeasurement();
+  crossSectionPlane = null;
 }
 
 function onWindowResize() {
@@ -1342,12 +1693,21 @@ function init3D(bodyData) {
       animationTime += 0.008; // Slightly slower for smoothness
       frameCount++;
 
-      // Animate Schumann waves (every frame - lightweight)
+      // Animate Schumann waves with interference (every frame - lightweight)
       if (formationsEnabled.schumann && schumannWaves.length > 0) {
         schumannWaves.forEach((wave) => {
-          const scale = 1 + 0.02 * Math.sin(animationTime + wave.userData.phase);
+          const freq = wave.userData.frequency;
+          const freqFactor = freq / 7.83; // Normalize to base frequency
+          const scale = 1 + 0.02 * Math.sin(animationTime * freqFactor + wave.userData.phase);
           wave.scale.set(scale, scale, scale);
-          wave.material.opacity = 0.1 + 0.08 * Math.sin(animationTime * 2 + wave.userData.phase);
+
+          // Interference creates variable opacity
+          if (formationsEnabled.interference && schumannWaves.length > 3) {
+            const interferencePhase = Math.sin(animationTime * freqFactor + wave.userData.phase);
+            wave.material.opacity = 0.1 + 0.08 * Math.abs(interferencePhase);
+          } else {
+            wave.material.opacity = 0.1 + 0.08 * Math.sin(animationTime * 2 + wave.userData.phase);
+          }
         });
       }
 
@@ -1360,6 +1720,11 @@ function init3D(bodyData) {
           positions[i + 1] += Math.sin(animationTime + i * 0.01) * 0.0004;
         }
         auroraParticles.geometry.attributes.position.needsUpdate = true;
+      }
+
+      // Apply view constraints
+      if (frameCount % 3 === 0) {
+        applyViewConstraints();
       }
 
       if (controls) controls.update();
@@ -1788,6 +2153,73 @@ function setupEventListeners() {
     createAurora(bodyData);
   };
 
+  // Measurement tools
+  document.getElementById('distanceMeasureBtn').onclick = startDistanceMeasurement;
+  document.getElementById('angleMeasureBtn').onclick = startAngleMeasurement;
+
+  document.getElementById('fieldStrengthCheck').onchange = (e) => {
+    fieldStrengthEnabled = e.target.checked;
+    if (!fieldStrengthEnabled) {
+      document.getElementById('measurementDisplay').style.display = 'none';
+    }
+  };
+
+  document.getElementById('crossSectionCheck').onchange = (e) => {
+    document.getElementById('crossSectionSlider').disabled = !e.target.checked;
+    const sliderValue = parseFloat(document.getElementById('crossSectionSlider').value);
+    updateCrossSectionPlane(sliderValue);
+  };
+
+  document.getElementById('crossSectionSlider').oninput = (e) => {
+    updateCrossSectionPlane(parseFloat(e.target.value));
+  };
+
+  // View preset buttons
+  document.getElementById('viewEquatorialBtn').onclick = () => setViewPreset('equatorial');
+  document.getElementById('viewPolarNorthBtn').onclick = () => setViewPreset('polarNorth');
+  document.getElementById('viewPolarSouthBtn').onclick = () => setViewPreset('polarSouth');
+  document.getElementById('viewSideBtn').onclick = () => setViewPreset('side');
+
+  // Rotation locks
+  document.getElementById('lockXCheck').onchange = (e) => {
+    rotationLocks.x = e.target.checked;
+    applyViewConstraints();
+  };
+
+  document.getElementById('lockYCheck').onchange = (e) => {
+    rotationLocks.y = e.target.checked;
+    applyViewConstraints();
+  };
+
+  document.getElementById('lockZCheck').onchange = (e) => {
+    rotationLocks.z = e.target.checked;
+    applyViewConstraints();
+  };
+
+  // Snap-to-angle
+  document.getElementById('snapAngleSelect').onchange = (e) => {
+    snapAngle = parseFloat(e.target.value);
+    showSuccess(snapAngle > 0 ? `Snap-to-angle: ${snapAngle}°` : 'Snap-to-angle disabled');
+  };
+
+  // Wave interference
+  document.getElementById('interferenceCheck').onchange = (e) => {
+    formationsEnabled.interference = e.target.checked;
+    document.getElementById('freq2Slider').disabled = !e.target.checked;
+    createInterferenceWaves();
+    showSuccess(e.target.checked ? 'Wave interference enabled' : 'Wave interference disabled');
+  };
+
+  document.getElementById('freq2Slider').oninput = (e) => {
+    secondaryFrequency = parseFloat(e.target.value);
+    document.getElementById('freq2Value').textContent = secondaryFrequency.toFixed(2) + ' Hz';
+  };
+
+  document.getElementById('freq2Slider').onchange = (e) => {
+    secondaryFrequency = parseFloat(e.target.value);
+    createInterferenceWaves();
+  };
+
   // View controls
   document.getElementById('showLabelsCheck').onchange = () => {
     const bodyData = planetaryData[bodySelect.value];
@@ -1814,6 +2246,14 @@ function setupEventListeners() {
 
   // Window resize
   window.addEventListener('resize', onWindowResize);
+
+  // Mouse events for measurements (add listeners after renderer is created)
+  setTimeout(() => {
+    if (renderer && renderer.domElement) {
+      renderer.domElement.addEventListener('click', handleMeasurementClick);
+      renderer.domElement.addEventListener('mousemove', updateFieldStrength);
+    }
+  }, 1000);
 
   // Cleanup
   window.addEventListener('beforeunload', () => {
