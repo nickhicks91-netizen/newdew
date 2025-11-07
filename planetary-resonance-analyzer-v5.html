@@ -639,6 +639,9 @@ footer {
       <div class="checkbox-item">
         <input type="checkbox" id="heatMapCheck">
         <label for="heatMapCheck" style="margin:0;">Energy Heat Map</label>
+        <span class="tooltip">ℹ️
+          <span class="tooltiptext">Shows resonance energy distribution. Pattern changes with frequency - higher frequencies create more bands</span>
+        </span>
       </div>
     </div>
 
@@ -796,7 +799,14 @@ footer {
       • Magnetosphere visualization<br>
       • Ring systems (Saturn, Jupiter)<br>
       • Aurora at magnetic poles<br>
-      • Energy heat maps
+      • Resonance energy heat maps<br>
+      <br>
+      <strong>💡 Heat Map Tips:</strong><br>
+      • 7.83 Hz: 1 band (fundamental)<br>
+      • 14-16 Hz: 2 bands<br>
+      • 50+ Hz: Many thin bands<br>
+      • Red = high energy antinodes<br>
+      • Blue = low energy nodes
     </div>
   </div>
 </main>
@@ -1201,7 +1211,9 @@ function createAurora(bodyData) {
 }
 
 /**
- * Create heat map overlay
+ * Create resonance energy heat map overlay
+ * Shows where electromagnetic standing wave energy concentrates
+ * based on current frequency using spherical harmonic patterns
  */
 function createHeatMap() {
   if (heatMapOverlay) {
@@ -1217,20 +1229,118 @@ function createHeatMap() {
   canvas.height = 256;
   const ctx = canvas.getContext('2d');
 
-  // Create gradient (equator hot, poles cold)
-  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  gradient.addColorStop(0, 'rgba(0, 100, 255, 0.5)'); // Cold pole
-  gradient.addColorStop(0.5, 'rgba(255, 100, 0, 0.8)'); // Hot equator
-  gradient.addColorStop(1, 'rgba(0, 100, 255, 0.5)'); // Cold pole
+  // Calculate mode number from frequency
+  // Fundamental Schumann (~7.83 Hz) = l=1, harmonics scale linearly
+  const modeNumber = Math.max(1, Math.round(currentFrequency / 7.83));
 
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Create image data for pixel-level control
+  const imageData = ctx.createImageData(canvas.width, canvas.height);
+  const data = imageData.data;
+
+  for (let y = 0; y < canvas.height; y++) {
+    // Map y to latitude: -π/2 (south pole) to +π/2 (north pole)
+    const lat = (y / canvas.height) * Math.PI - Math.PI / 2;
+    const theta = Math.PI / 2 - lat; // Co-latitude for spherical harmonics (0 at north pole)
+
+    // Calculate resonance energy using simplified spherical harmonic
+    // For m=0 (axisymmetric), P_l(cos(theta)) gives latitude dependence
+    const energy = calculateResonanceEnergy(theta, modeNumber);
+
+    // Map energy to color (0=blue, 0.5=cyan, 0.7=yellow, 0.85=orange, 1=red)
+    const color = energyToColor(energy);
+
+    // Fill entire row with same color (longitude-independent)
+    for (let x = 0; x < canvas.width; x++) {
+      const idx = (y * canvas.width + x) * 4;
+      data[idx] = color.r;
+      data[idx + 1] = color.g;
+      data[idx + 2] = color.b;
+      data[idx + 3] = color.a;
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
 
   const texture = new THREE.CanvasTexture(canvas);
   planetMesh.material.emissiveMap = texture;
-  planetMesh.material.emissiveIntensity = 0.3;
+  planetMesh.material.emissiveIntensity = 0.4;
   planetMesh.material.needsUpdate = true;
   heatMapOverlay = texture;
+}
+
+/**
+ * Calculate resonance energy at given co-latitude for mode number l
+ * Uses Legendre polynomial approximation for spherical harmonics
+ */
+function calculateResonanceEnergy(theta, l) {
+  const x = Math.cos(theta);
+
+  // Calculate Legendre polynomial P_l(x) using recurrence relation
+  let P_prev = 1; // P_0
+  let P_curr = x;  // P_1
+
+  if (l === 0) return 0.3; // Uniform low energy for DC mode
+  if (l === 1) {
+    // P_1(cos(theta)) = cos(theta)
+    // Energy proportional to |P_1|^2
+    return Math.pow(Math.abs(P_curr), 2);
+  }
+
+  // Calculate P_l using recurrence: (l+1)P_{l+1} = (2l+1)xP_l - lP_{l-1}
+  for (let n = 2; n <= l; n++) {
+    const P_next = ((2 * n - 1) * x * P_curr - (n - 1) * P_prev) / n;
+    P_prev = P_curr;
+    P_curr = P_next;
+  }
+
+  // Energy density proportional to |Y_l^0|^2 ∝ |P_l|^2
+  const energy = Math.pow(Math.abs(P_curr), 2);
+
+  // Normalize to 0-1 range (higher modes have smaller peak values)
+  const normalizationFactor = Math.min(1, 2.5 / Math.sqrt(l));
+  return Math.min(1, energy * normalizationFactor);
+}
+
+/**
+ * Map energy value (0-1) to heat map color
+ * Blue (low) → Cyan → Yellow → Orange → Red (high)
+ */
+function energyToColor(energy) {
+  let r, g, b;
+
+  if (energy < 0.25) {
+    // Blue to Cyan (0.0 - 0.25)
+    const t = energy / 0.25;
+    r = 0;
+    g = Math.floor(100 + 155 * t);
+    b = 255;
+  } else if (energy < 0.5) {
+    // Cyan to Green (0.25 - 0.5)
+    const t = (energy - 0.25) / 0.25;
+    r = 0;
+    g = 255;
+    b = Math.floor(255 * (1 - t));
+  } else if (energy < 0.75) {
+    // Green to Yellow (0.5 - 0.75)
+    const t = (energy - 0.5) / 0.25;
+    r = Math.floor(255 * t);
+    g = 255;
+    b = 0;
+  } else if (energy < 0.9) {
+    // Yellow to Orange (0.75 - 0.9)
+    const t = (energy - 0.75) / 0.15;
+    r = 255;
+    g = Math.floor(255 - 100 * t);
+    b = 0;
+  } else {
+    // Orange to Red (0.9 - 1.0)
+    const t = (energy - 0.9) / 0.1;
+    r = 255;
+    g = Math.floor(155 * (1 - t));
+    b = 0;
+  }
+
+  return { r, g, b, a: Math.floor(200 + 55 * energy) }; // Alpha increases with energy
 }
 
 function createTextSprite(text, color = '#ffffff') {
@@ -2102,6 +2212,10 @@ function setupEventListeners() {
 
   freqSlider.onchange = () => {
     lastAnalysisData = runAnalysis(currentFrequency);
+    // Update heat map if enabled - pattern changes with frequency
+    if (formationsEnabled.heatMap && planetMesh) {
+      createHeatMap();
+    }
   };
 
   // Body selection
