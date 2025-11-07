@@ -302,6 +302,13 @@ window.onload = function() {
     let model, sync;
     let baseHR = 60;
 
+    // Independent physiological degrees of freedom (Ornstein-Uhlenbeck processes)
+    let preloadFactor = 1.0;        // Venous return modulation (0.7-1.3)
+    let afterloadFactor = 1.0;      // SVR modulation independent of baroreflex (0.8-1.2)
+    let complianceFactor = 1.0;     // Arterial compliance (0.85-1.15)
+    let sympatheticTone = 0.5;      // Autonomic balance 0=parasympathetic, 1=sympathetic
+    let chemoreceptorDrive = 0.0;   // Chemoreceptor reflex (-0.2 to 0.2)
+
     const dom = {
         hrSlider: document.getElementById('hrSlider'),
         rsaSlider: document.getElementById('rsaSlider'),
@@ -586,12 +593,18 @@ window.onload = function() {
       step(dt = 0.01, rsa = 0, baseHR = 60) {
         this.time += dt;
         const baseFreq = 2 * Math.PI * baseHR / 60;
-        const rsaModulation = 1 + rsa * Math.sin(0.3 * this.time);
+        this.rsaModulation = 1 + rsa * Math.sin(0.3 * this.time); // Store for instantaneous HR calculation
+        this.baseFreq = baseFreq; // Store for instantaneous HR calculation
         const dtheta = this.theta.map((_, i) => {
           const sumSin = this.theta.reduce((sum, thj) => sum + Math.sin(thj - this.theta[i]), 0);
-          return baseFreq * rsaModulation + (this.K / this.N) * sumSin;
+          return baseFreq * this.rsaModulation + (this.K / this.N) * sumSin;
         });
         this.theta = this.theta.map((th, i) => (th + dtheta[i] * dt) % (2 * Math.PI));
+      }
+      getInstantaneousHR() {
+        // Calculate instantaneous HR from average phase velocity (including RSA modulation)
+        // HR in BPM = (angular frequency in rad/s) * 60 / (2π)
+        return (this.baseFreq * this.rsaModulation * 60) / (2 * Math.PI);
       }
       getGCI() {
         const re = this.theta.reduce((sum, th) => sum + Math.cos(th), 0) / this.N;
@@ -1655,6 +1668,32 @@ window.onload = function() {
         }
     }
 
+    // Ornstein-Uhlenbeck process: dx = -θ(x - μ)dt + σdW
+    // Creates mean-reverting stochastic dynamics with physiological time constants
+    function updatePhysiologicalFactors(dt) {
+        // Helper for OU process
+        const ouStep = (current, mean, theta, sigma) => {
+            const drift = -theta * (current - mean) * dt;
+            const diffusion = sigma * Math.sqrt(dt) * (Math.random() - 0.5) * 2;
+            return current + drift + diffusion;
+        };
+
+        // Preload (venous return): slow changes, moderate variance (τ=10s)
+        preloadFactor = Math.max(0.7, Math.min(1.3, ouStep(preloadFactor, 1.0, 0.1, 0.15)));
+
+        // Afterload (SVR): medium-speed changes, moderate variance (τ=5s)
+        afterloadFactor = Math.max(0.8, Math.min(1.2, ouStep(afterloadFactor, 1.0, 0.2, 0.12)));
+
+        // Compliance: very slow changes, low variance (τ=20s)
+        complianceFactor = Math.max(0.85, Math.min(1.15, ouStep(complianceFactor, 1.0, 0.05, 0.08)));
+
+        // Sympathetic tone: slow oscillations (τ=15s)
+        sympatheticTone = Math.max(0.0, Math.min(1.0, ouStep(sympatheticTone, 0.5, 0.067, 0.2)));
+
+        // Chemoreceptor drive: fast response, low baseline (τ=2s)
+        chemoreceptorDrive = Math.max(-0.2, Math.min(0.2, ouStep(chemoreceptorDrive, 0.0, 0.5, 0.1)));
+    }
+
     function mainLoop() {
         if (isPaused) {
             animationFrameId = requestAnimationFrame(mainLoop);
@@ -1667,6 +1706,9 @@ window.onload = function() {
             model.step(SimConfig.noise);
             model.time = (model.time || 0) + SimConfig.dt; // Track sim time for pulsatility
             sync.step(SimConfig.dt, SimConfig.rsa, baseHR);
+
+            // Update independent physiological degrees of freedom
+            updatePhysiologicalFactors(SimConfig.dt);
 
             const quadrants = [{row: 0, col: 0}, {row: 0, col: 1}, {row: 1, col: 0}, {row: 1, col: 1}];
             const avgU = model.getAverageU();
@@ -1685,18 +1727,28 @@ window.onload = function() {
             const shearProxy = model.getShearProxy();
             const hemolysisIndex = model.getHemolysisIndex();
 
+            // Cardiovascular dynamics with independent physiological factors
             const coherence = gci;
-            const sv = 70 * Math.max(0.5, coherence);
+            const baseSV = 70 * Math.max(0.5, coherence);
+            const sv = baseSV * preloadFactor; // Preload affects stroke volume (Frank-Starling)
             const co = baseHR * sv / 1000;
-            let map = co * SimConfig.svr / 80;
+
+            // MAP = CO × SVR, with afterload and compliance modulation
+            const effectiveSVR = SimConfig.svr * afterloadFactor;
+            let map = (co * effectiveSVR / 80) / complianceFactor; // Compliance reduces pressure for same flow
 
             if (isBaroreflexOn) {
                 const map_error = SimConfig.target_map - map;
-                const baro_adjust = map_error * 0.5;
+                // Baroreflex gain modulated by sympathetic tone and chemoreceptor drive
+                const reflexGain = 0.5 * (1 + sympatheticTone * 0.4) + chemoreceptorDrive * 2.0;
+                const baro_adjust = map_error * reflexGain;
                 baseHR = Math.max(40, Math.min(180, baseHR + baro_adjust * SimConfig.dt));
             }
 
-            const dias = map * 0.75, sys = map * 1.25;
+            // Pulse pressure affected by compliance (stiffer vessels → wider pulse pressure)
+            const pulseWidthFactor = 1.0 / complianceFactor;
+            const dias = map * (0.75 / pulseWidthFactor);
+            const sys = map * (1.25 * pulseWidthFactor);
 
             // CFD hemodynamics simulation
             if (isCfd && cfdPlane) {
@@ -1832,7 +1884,16 @@ window.onload = function() {
                 ecgCorrelation = numerator / Math.sqrt(denomReal * denomSim);
             }
 
-            updateTelemetry({ ecg, avgU, hr: baseHR, co, sys, dias, gci, plv, energy, winding, ejectionFraction, spiralDetection, shearProxy, hemolysisIndex });
+            // Calculate instantaneous HR with HRV (Heart Rate Variability)
+            // Box-Muller transform for Gaussian noise with physiological HRV magnitude
+            const u1 = Math.random();
+            const u2 = Math.random();
+            const gaussianNoise = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+            const hrvMagnitude = 6; // SDNN ~50ms -> ~6 BPM variation (physiological range)
+            const instantaneousHR = sync.getInstantaneousHR(); // RSA-modulated HR from Kuramoto
+            const hrWithVariability = instantaneousHR + (gaussianNoise * hrvMagnitude);
+
+            updateTelemetry({ ecg, avgU, hr: hrWithVariability, co, sys, dias, gci, plv, energy, winding, ejectionFraction, spiralDetection, shearProxy, hemolysisIndex });
             updateGraphics();
 
             // Update blood cells to follow particles
@@ -1898,6 +1959,14 @@ window.onload = function() {
         sync = new KuramotoSync(4, SimConfig.k);
         exportBuffer = [];
         phantomFlowField = null;
+
+        // Reset independent physiological state variables to baseline
+        preloadFactor = 1.0;
+        afterloadFactor = 1.0;
+        complianceFactor = 1.0;
+        sympatheticTone = 0.5;
+        chemoreceptorDrive = 0.0;
+
         if (nodeMesh) scene.remove(nodeMesh);
 
         const geo = icosahedronGeometry();
