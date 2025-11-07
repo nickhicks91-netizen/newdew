@@ -661,11 +661,6 @@ footer {
 
     <h3>🎬 View Controls</h3>
     <div class="checkbox-item">
-      <input type="checkbox" id="autoRotateCheck" checked>
-      <label for="autoRotateCheck" style="margin:0;">Auto-Rotate 3D View</label>
-    </div>
-
-    <div class="checkbox-item">
       <input type="checkbox" id="showLabelsCheck" checked>
       <label for="showLabelsCheck" style="margin:0;">Show Boundary Labels</label>
     </div>
@@ -1251,8 +1246,7 @@ function init3D(bodyData) {
       controls.enableDamping = true;
       controls.dampingFactor = 0.05;
       controls.enablePan = true;
-      controls.autoRotate = document.getElementById('autoRotateCheck').checked;
-      controls.autoRotateSpeed = 0.5;
+      controls.autoRotate = false; // Manual controls only
       controls.minDistance = 1.5;
       controls.maxDistance = 10;
     } else {
@@ -1795,10 +1789,6 @@ function setupEventListeners() {
   };
 
   // View controls
-  document.getElementById('autoRotateCheck').onchange = (e) => {
-    if (controls) controls.autoRotate = e.target.checked;
-  };
-
   document.getElementById('showLabelsCheck').onchange = () => {
     const bodyData = planetaryData[bodySelect.value];
     init3D(bodyData);
