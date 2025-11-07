@@ -6,8 +6,8 @@
 <title>HRAT Pro v5.0 – Advanced Planetary Resonance Analyzer</title>
 
 <!-- THREE.js for 3D rendering -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.157.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/examples/js/controls/OrbitControls.js"></script>
 
 <!-- jsPDF for PDF export -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
@@ -421,8 +421,7 @@ footer {
 "use strict";
 
 // ========== CONSTANTS ==========
-// Note: Three.js r157 deprecation warnings are expected and don't affect functionality
-// These will be addressed in a future migration to Three.js r160+ with ES modules
+// Using Three.js r149 for better CDN stability and OrbitControls compatibility
 const SPEED_OF_LIGHT_M_S = 2.99792458e8;
 const MEASUREMENT_CRITERION = 0.25;
 const DEFAULT_FREQUENCY_STEP = 0.05;
@@ -939,6 +938,9 @@ function init3D(bodyData) {
       controls.autoRotateSpeed = 0.5;
       controls.minDistance = 1.5;
       controls.maxDistance = 10;
+    } else {
+      console.error('OrbitControls not loaded! 3D interaction disabled.');
+      showError('3D controls failed to load. Try refreshing the page.');
     }
 
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
