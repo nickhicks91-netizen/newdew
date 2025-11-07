@@ -736,12 +736,15 @@ footer {
 
 // ========== CONSTANTS ==========
 // Using Three.js r149 with inlined OrbitControls for guaranteed compatibility
+// Optimized for smooth 60 FPS performance
 const SPEED_OF_LIGHT_M_S = 2.99792458e8;
 const MEASUREMENT_CRITERION = 0.25;
 const DEFAULT_FREQUENCY_STEP = 0.05;
-const SPHERE_SEGMENTS = 32;
-const RING_SEGMENTS = 64;
+const SPHERE_SEGMENTS = 24; // Reduced from 32 for better performance
+const RING_SEGMENTS = 48; // Reduced from 64 for better performance
 const MAX_HISTORY_ITEMS = 10;
+const AURORA_PARTICLE_COUNT = 500; // Reduced from 2000 for performance
+const SCHUMANN_WAVE_SEGMENTS = 32; // Reduced from 64 for performance
 
 // ========== PLANETARY DATA WITH FORMATIONS ==========
 const planetaryData = {
@@ -963,7 +966,7 @@ function createSchumannWaves() {
 
   // Create multiple wave bands at different phases
   for (let i = 0; i < 3; i++) {
-    const geometry = new THREE.SphereGeometry(1.05 + i * 0.02, 64, 32);
+    const geometry = new THREE.SphereGeometry(1.05 + i * 0.02, SCHUMANN_WAVE_SEGMENTS, SCHUMANN_WAVE_SEGMENTS / 2);
     const material = new THREE.MeshBasicMaterial({
       color: 0x00ffff,
       transparent: true,
@@ -1087,7 +1090,7 @@ function createAurora(bodyData) {
 
   if (!formationsEnabled.aurora || !bodyData.hasAurora) return;
 
-  const particleCount = 2000;
+  const particleCount = AURORA_PARTICLE_COUNT; // Reduced for better performance
   const positions = new Float32Array(particleCount * 3);
   const colors = new Float32Array(particleCount * 3);
 
@@ -1120,10 +1123,10 @@ function createAurora(bodyData) {
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
   const material = new THREE.PointsMaterial({
-    size: 0.015,
+    size: 0.02, // Slightly larger since fewer particles
     vertexColors: true,
     transparent: true,
-    opacity: 0.6,
+    opacity: 0.7, // Slightly more visible
     blending: THREE.AdditiveBlending
   });
 
@@ -1339,25 +1342,28 @@ function init3D(bodyData) {
 
     camera.position.set(0, 1, 3);
 
+    let frameCount = 0;
     function animate() {
       requestAnimationFrame(animate);
-      animationTime += 0.01;
+      animationTime += 0.008; // Slightly slower for smoothness
+      frameCount++;
 
-      // Animate Schumann waves
+      // Animate Schumann waves (every frame - lightweight)
       if (formationsEnabled.schumann && schumannWaves.length > 0) {
-        schumannWaves.forEach((wave, i) => {
+        schumannWaves.forEach((wave) => {
           const scale = 1 + 0.02 * Math.sin(animationTime + wave.userData.phase);
           wave.scale.set(scale, scale, scale);
-          wave.material.opacity = 0.1 + 0.1 * Math.sin(animationTime * 2 + wave.userData.phase);
+          wave.material.opacity = 0.1 + 0.08 * Math.sin(animationTime * 2 + wave.userData.phase);
         });
       }
 
-      // Animate aurora
-      if (formationsEnabled.aurora && auroraParticles) {
-        auroraParticles.rotation.y += 0.001;
+      // Animate aurora (every 2 frames for better performance)
+      if (formationsEnabled.aurora && auroraParticles && frameCount % 2 === 0) {
+        auroraParticles.rotation.y += 0.0008;
         const positions = auroraParticles.geometry.attributes.position.array;
-        for (let i = 0; i < positions.length; i += 3) {
-          positions[i + 1] += Math.sin(animationTime + i * 0.01) * 0.0005;
+        // Update every 3rd particle for even better performance
+        for (let i = 0; i < positions.length; i += 9) {
+          positions[i + 1] += Math.sin(animationTime + i * 0.01) * 0.0004;
         }
         auroraParticles.geometry.attributes.position.needsUpdate = true;
       }
