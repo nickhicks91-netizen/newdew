@@ -1,0 +1,44 @@
+model:
+  num_nodes: 20
+  dim: 128
+  ricci: -2.0
+  torsion_scale: 0.1
+  penrose_level: 2
+  num_layers: 5
+
+encoder:
+  mode: 'eeg'  # Options: 'text', 'eeg', 'spectral'
+  dim: 128
+
+decoder:
+  num_classes: 2
+  chiral_projection: true
+
+training:
+  batch_size: 16
+  learning_rate: 0.001
+  num_epochs: 10
+  optimizer: 'adam'
+  weight_decay: 0.0001
+
+benchmark:
+  baseline: 'gat'  # Options: 'gat', 'vanilla_attention'
+  dataset: 'emotion'  # HuggingFace dataset
+  metrics:
+    - 'coherence'
+    - 'fidelity'
+    - 'hallucination_rate'
+  targets:
+    speed_multiplier: 1.4
+    fidelity: 0.98
+    hallucination_drop: 0.05
+
+wandb:
+  project: 'echozero'
+  entity: null
+  log_interval: 10
+
+paths:
+  data_dir: './data'
+  checkpoint_dir: './checkpoints'
+  output_dir: './outputs'
