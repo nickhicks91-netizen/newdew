@@ -14,6 +14,12 @@ decoder:
   num_classes: 2
   chiral_projection: true
 
+echo_core:
+  num_spheres: 8  # Number of harmonic memory nodes (octave gates)
+  use_feedback: true  # Enable phase-locking feedback paths
+  helix_turns: 4  # Number of helical turns for k=3 torsion coupling
+  dropout: 0.1  # Dropout rate for regularization
+
 training:
   batch_size: 16
   learning_rate: 0.001
@@ -32,6 +38,10 @@ benchmark:
     speed_multiplier: 1.4
     fidelity: 0.98
     hallucination_drop: 0.05
+    # EchoCore-specific targets
+    coherence_std_on_noise: 0.065  # Target std on 30% noise (25% better than 0.087 baseline)
+    noise_rejection_rate: 0.88  # 88% noise rejection target
+    toroidal_stability: 0.85  # Minimum toroidal stability
 
 wandb:
   project: 'echozero'
