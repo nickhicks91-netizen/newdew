@@ -5,6 +5,10 @@ model:
   torsion_scale: 0.1
   penrose_level: 2
   num_layers: 5
+  # TEA/ECC parameters (for magnitude-aware coherence)
+  attn_temp: 0.7        # Attention temperature (lower = sharper)
+  knn_k: 6              # KNN sparsification parameter
+  ecc_band_bins: 4      # Number of spectral bands for ECC auto-lock
 
 encoder:
   mode: 'eeg'  # Options: 'text', 'eeg', 'spectral'
