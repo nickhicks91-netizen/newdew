@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-white;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10;
+  }
+
+  .glass-strong {
+    @apply bg-black/40 backdrop-blur-2xl border border-purple-500/30;
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-pink-400 via-purple-400 to-green-400 bg-clip-text text-transparent;
+  }
+
+  .metric-card {
+    @apply glass-strong rounded-xl p-4 hover:border-purple-400/50 transition-all;
+  }
+
+  .btn-primary {
+    @apply px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 glass-strong hover:bg-white/10 rounded-lg transition-all;
+  }
+}
