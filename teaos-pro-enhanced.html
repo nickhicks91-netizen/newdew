@@ -1022,8 +1022,8 @@
                 this.channelStates = new Array(this.channels).fill(0);
 
                 // Metrics
-                this.coherence = 0;
-                this.coherenceSmoothed = 0;
+                this.coherence = 0.7;
+                this.coherenceSmoothed = 0.7;
                 this.heartbeat = 0;
                 this.heartbeatPhase = 0;
                 this.messageCount = 0;
@@ -1161,13 +1161,13 @@
                         const torsion1 = newField[v1];
                         const torsion2 = newField[v2];
 
-                        tempField[v1] += torsion2 * coupling * 0.12;
-                        tempField[v2] += torsion1 * coupling * 0.12;
+                        tempField[v1] += torsion2 * coupling * 0.08;
+                        tempField[v2] += torsion1 * coupling * 0.08;
                     }
 
-                    // Apply decay
+                    // Apply decay and clamp to prevent runaway values
                     for (let i = 0; i < tempField.length; i++) {
-                        newField[i] = tempField[i] * 0.92;
+                        newField[i] = Math.min(2.0, Math.max(-2.0, tempField[i] * 0.92));
                     }
                 }
 
@@ -1232,7 +1232,7 @@
                 ));
 
                 // Apply exponential smoothing to prevent rapid fluctuations
-                this.coherenceSmoothed = this.coherenceSmoothed * 0.95 + newCoherence * 0.05;
+                this.coherenceSmoothed = this.coherenceSmoothed * 0.9 + newCoherence * 0.1;
                 this.coherence = this.coherenceSmoothed;
             }
 
@@ -1241,14 +1241,16 @@
                 this.heartbeatPhase += Math.PI / 30; // 60 BPM at 60 FPS
                 this.heartbeat = (Math.sin(this.heartbeatPhase) + 1) / 2;
 
-                // Natural decay
+                // Natural decay with clamping
                 for (let i = 0; i < this.torsionField.length; i++) {
-                    this.torsionField[i] *= 0.98;
+                    this.torsionField[i] *= 0.95;
+                    // Clamp to reasonable range
+                    this.torsionField[i] = Math.min(2.0, Math.max(-2.0, this.torsionField[i]));
                 }
 
                 // Update quantum states
                 for (let i = 0; i < this.totalPoints; i++) {
-                    this.quantumStates[i] *= 0.99;
+                    this.quantumStates[i] *= 0.97;
                 }
 
                 this.updateCoherence();
