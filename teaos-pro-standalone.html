@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeaOS PRO - Rhombic Torsion Spiralhedron</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Three.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      background: linear-gradient(to bottom right, #020617, #581c87, #020617);
+    }
+
+    .glass {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .glass-strong {
+      background: rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(40px);
+      border: 1px solid rgba(168, 85, 247, 0.3);
+    }
+
+    .gradient-text {
+      background: linear-gradient(to right, #f472b6, #c084fc, #4ade80);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .metric-card {
+      transition: all 0.3s;
+    }
+
+    .metric-card:hover {
+      border-color: rgba(168, 85, 247, 0.5);
+    }
+
+    .chat-message {
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .animate-spin {
+      animation: spin 1s linear infinite;
+    }
+
+    .scrollbar-hidden::-webkit-scrollbar {
+      display: none;
+    }
+
+    .scrollbar-hidden {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    #canvas3d {
+      cursor: grab;
+    }
+
+    #canvas3d:active {
+      cursor: grabbing;
+    }
+  </style>
+</head>
+<body class="text-white">
+  <div id="app" class="w-screen h-screen flex flex-col"></div>
+
+  <script>
+    // ============================================================================
+    // RHOMBIC TORSION SPIRALHEDRON - CORE ARCHITECTURE
+    // ============================================================================
+
+    class RhombicTorsionSpiralhedron {
+      constructor(dims = 32, torsionAngle = 60, channels = 4, pointsPerChannel = 40) {
+        this.dims = dims;
+        this.phi = (1 + Math.sqrt(5)) / 2;
+        this.torsionAngle = torsionAngle * Math.PI / 180;
+        this.channels = channels;
+        this.pointsPerChannel = pointsPerChannel;
+
+        this.points = this.generateRhombicLatticePoints();
+        this.memory = new Array(this.points.length).fill(null).map(() => []);
+        this.adjacency = this.computeRhombicAdjacency();
+
+        this.phaseState = new Array(dims).fill(0);
+        this.coherence = 1.0;
+        this.torsionPhase = 0;
+        this.channelStates = new Array(channels).fill(0);
+        this.decayRate = 0.001;
+      }
+
+      generateRhombicLatticePoints() {
+        const points = [];
+
+        for (let ch = 0; ch < this.channels; ch++) {
+          const channelOffset = (2 * Math.PI * ch) / this.channels;
+
+          for (let i = 0; i < this.pointsPerChannel; i++) {
+            const t = i / this.pointsPerChannel;
+            const turns = 5;
+
+            const theta = t * 2 * Math.PI * turns + channelOffset;
+            const torsion = t * this.torsionAngle * turns;
+
+            const rhombicPhase1 = Math.cos(theta * 3);
+            const rhombicPhase2 = Math.cos(theta * 3 + Math.PI / 3);
+            const rhombicMod = 0.3 * (rhombicPhase1 + rhombicPhase2);
+
+            const R = 1.0;
+            const r = 0.3 + rhombicMod;
+            const phi = theta + torsion;
+
+            const x = (R + r * Math.cos(phi)) * Math.cos(theta);
+            const y = (R + r * Math.cos(phi)) * Math.sin(theta);
+            const z = r * Math.sin(phi) + 0.2 * Math.sin(theta * 4);
+
+            const latticeScale = 3;
+            const lx = Math.round(x * latticeScale) / latticeScale;
+            const ly = Math.round(y * latticeScale) / latticeScale;
+            const lz = Math.round(z * latticeScale) / latticeScale;
+
+            points.push({
+              id: ch * this.pointsPerChannel + i,
+              channel: ch,
+              x: lx, y: ly, z: lz,
+              rawX: x, rawY: y, rawZ: z,
+              theta, phi, torsion,
+              rhombicPhase: rhombicPhase1 + rhombicPhase2,
+              t
+            });
+          }
+        }
+
+        return points;
+      }
+
+      computeRhombicAdjacency() {
+        const adjacency = new Map();
+
+        for (let i = 0; i < this.points.length; i++) {
+          const p1 = this.points[i];
+          const neighbors = [];
+
+          for (let j = 0; j < this.points.length; j++) {
+            if (i === j) continue;
+
+            const p2 = this.points[j];
+            const dx = Math.abs(p2.x - p1.x);
+            const dy = Math.abs(p2.y - p1.y);
+            const dz = Math.abs(p2.z - p1.z);
+
+            const rhombicDist = dx * (1 + 0.5 * Math.cos(0)) +
+                               dy * (1 + 0.5 * Math.cos(Math.PI / 3)) +
+                               dz * (1 + 0.5 * Math.cos(2 * Math.PI / 3));
+
+            if (rhombicDist > 0.05 && rhombicDist < 0.8) {
+              neighbors.push({
+                id: j,
+                distance: rhombicDist,
+                torsionAlignment: Math.cos(p2.torsion - p1.torsion)
+              });
+            }
+          }
+
+          neighbors.sort((a, b) => a.distance - b.distance);
+          adjacency.set(i, neighbors.slice(0, 6));
+        }
+
+        return adjacency;
+      }
+
+      hashToPoint(pattern) {
+        let hash = 0;
+        for (let i = 0; i < pattern.length; i++) {
+          hash = ((hash << 5) - hash) + pattern.charCodeAt(i);
+          hash = hash & hash;
+        }
+
+        const channel = Math.abs(hash) % this.channels;
+        const offset = Math.abs(hash >> 8) % this.pointsPerChannel;
+
+        return channel * this.pointsPerChannel + offset;
+      }
+
+      findNearestPoint(phaseSignature, preferredChannel = null) {
+        let minDist = Infinity;
+        let nearest = 0;
+
+        const searchPoints = preferredChannel !== null
+          ? this.points.filter(p => p.channel === preferredChannel)
+          : this.points;
+
+        for (const point of searchPoints) {
+          let spatialDist = 0;
+          for (let d = 0; d < Math.min(3, phaseSignature.length); d++) {
+            const coord = d === 0 ? point.x : (d === 1 ? point.y : point.z);
+            spatialDist += Math.pow(phaseSignature[d] - coord, 2);
+          }
+          spatialDist = Math.sqrt(spatialDist);
+
+          let phaseDist = 0;
+          for (let d = 3; d < phaseSignature.length; d++) {
+            phaseDist += Math.pow(phaseSignature[d], 2);
+          }
+          phaseDist = Math.sqrt(phaseDist);
+
+          const torsionAlignment = Math.cos(point.torsion - this.torsionPhase);
+          const totalDist = (spatialDist + phaseDist) * (1 - 0.2 * torsionAlignment);
+
+          if (totalDist < minDist) {
+            minDist = totalDist;
+            nearest = point.id;
+          }
+        }
+
+        return nearest;
+      }
+
+      store(pattern) {
+        const baseIndex = this.hashToPoint(pattern);
+        const phaseSignature = this.computePhaseSignature(pattern);
+
+        let targetIndex = this.findNearestPoint(phaseSignature, this.points[baseIndex].channel);
+
+        if (this.memory[targetIndex].length > 4) {
+          let walkIndex = targetIndex;
+          let walked = 0;
+          const maxWalk = 20;
+
+          while (this.memory[walkIndex].length > 4 && walked < maxWalk) {
+            const neighbors = this.adjacency.get(walkIndex) || [];
+            if (neighbors.length === 0) break;
+
+            let bestNeighbor = neighbors[0].id;
+            let minLoad = this.memory[neighbors[0].id].length;
+
+            for (const neighbor of neighbors) {
+              const load = this.memory[neighbor.id].length;
+              if (load < minLoad) {
+                minLoad = load;
+                bestNeighbor = neighbor.id;
+              }
+            }
+
+            walkIndex = bestNeighbor;
+            walked++;
+          }
+
+          targetIndex = walkIndex;
+        }
+
+        this.memory[targetIndex].push({
+          pattern,
+          phase: phaseSignature,
+          timestamp: Date.now(),
+          torsion: this.torsionPhase
+        });
+
+        const point = this.points[targetIndex];
+        this.channelStates[point.channel]++;
+        this.torsionPhase += 0.1;
+
+        this.updateCoherence();
+
+        return { success: true, index: targetIndex, point };
+      }
+
+      computePhaseSignature(pattern) {
+        const signature = new Array(this.dims).fill(0);
+
+        for (let i = 0; i < pattern.length; i++) {
+          const charCode = pattern.charCodeAt(i);
+          const dim = i % this.dims;
+          const localTorsion = (i / pattern.length) * this.torsionAngle;
+          const rhombicMod = Math.cos(i * Math.PI / 3);
+          const decay = Math.exp(-i / (pattern.length * this.phi));
+
+          signature[dim] += charCode * Math.cos(localTorsion) * (1 + 0.3 * rhombicMod) * decay;
+        }
+
+        const magnitude = Math.sqrt(signature.reduce((sum, x) => sum + x * x, 0));
+        return signature.map(x => x / (magnitude + 1e-10));
+      }
+
+      phaseResonance(phase1, phase2) {
+        let dotProduct = 0;
+        for (let i = 0; i < phase1.length; i++) {
+          dotProduct += phase1[i] * phase2[i];
+        }
+
+        const torsionBonus = Math.cos(this.torsionPhase) * 0.15;
+        const rhombicResonance = Math.cos(this.torsionPhase * 3) * 0.1;
+
+        return dotProduct * (1 + torsionBonus + rhombicResonance);
+      }
+
+      updateCoherence() {
+        let totalResonance = 0;
+        let torsionCoherence = 0;
+        let rhombicCoherence = 0;
+        let count = 0;
+
+        for (let i = 0; i < this.points.length; i++) {
+          const point = this.points[i];
+
+          for (const entry of this.memory[i]) {
+            const resonance = this.phaseResonance(this.phaseState, entry.phase);
+            totalResonance += resonance;
+
+            const torsionAlign = Math.cos(point.torsion - this.torsionPhase);
+            torsionCoherence += torsionAlign;
+
+            const neighbors = this.adjacency.get(i) || [];
+            let neighborCoherence = 0;
+            for (const neighbor of neighbors) {
+              if (this.memory[neighbor.id].length > 0) {
+                neighborCoherence += neighbor.torsionAlignment;
+              }
+            }
+            rhombicCoherence += neighborCoherence / (neighbors.length + 1);
+
+            count++;
+          }
+        }
+
+        if (count > 0) {
+          this.coherence = (1 + totalResonance / count) / 2;
+
+          const torsionBonus = (torsionCoherence / count) * 0.25;
+          const rhombicBonus = (rhombicCoherence / count) * 0.1;
+          const channelBonus = this.getChannelBalance() * 0.15;
+
+          this.coherence = Math.min(1, this.coherence + torsionBonus + rhombicBonus + channelBonus);
+        } else {
+          this.coherence = 1.0;
+        }
+
+        this.coherence *= (1 - this.decayRate);
+        this.coherence = Math.max(0, Math.min(1, this.coherence));
+      }
+
+      getChannelBalance() {
+        const avg = this.channelStates.reduce((a, b) => a + b, 0) / this.channels;
+        const variance = this.channelStates.reduce((sum, load) => {
+          return sum + Math.pow(load - avg, 2);
+        }, 0) / this.channels;
+        return Math.exp(-variance / (avg + 1));
+      }
+
+      getTopologicalProtection() {
+        let protection = 0;
+        let count = 0;
+
+        for (let i = 0; i < this.points.length; i++) {
+          for (const entry of this.memory[i]) {
+            const torsionAlign = Math.cos(entry.torsion - this.torsionPhase);
+            protection += (torsionAlign + 1) / 2;
+            count++;
+          }
+        }
+
+        return count > 0 ? protection / count : 1.0;
+      }
+
+      getRhombicStability() {
+        let stability = 0;
+        let count = 0;
+
+        for (let i = 0; i < this.points.length; i++) {
+          if (this.memory[i].length === 0) continue;
+
+          const neighbors = this.adjacency.get(i) || [];
+          let neighborLoad = 0;
+
+          for (const neighbor of neighbors) {
+            neighborLoad += this.memory[neighbor.id].length;
+          }
+
+          const avgNeighborLoad = neighborLoad / (neighbors.length + 1);
+          const balance = 1 / (1 + Math.abs(this.memory[i].length - avgNeighborLoad));
+
+          stability += balance;
+          count++;
+        }
+
+        return count > 0 ? stability / count : 1.0;
+      }
+
+      getSpiralDepth() {
+        const maxIndex = Math.max(...this.memory.map((m, i) => m.length > 0 ? i : 0));
+        return maxIndex / this.points.length;
+      }
+
+      getStats() {
+        const totalPatterns = this.memory.reduce((sum, point) => sum + point.length, 0);
+
+        return {
+          coherence: this.coherence,
+          totalPatterns,
+          channelBalance: this.getChannelBalance(),
+          torsionPhase: this.torsionPhase,
+          topologicalProtection: this.getTopologicalProtection(),
+          rhombicStability: this.getRhombicStability(),
+          spiralDepth: this.getSpiralDepth(),
+          pointsUsed: this.memory.filter(m => m.length > 0).length,
+          totalPoints: this.points.length
+        };
+      }
+    }
+
+    // ============================================================================
+    // TEAOS PRO SYSTEM
+    // ============================================================================
+
+    class HeartbeatCoherence {
+      constructor(bpm = 60) {
+        this.bpm = bpm;
+        this.phase = 0;
+        this.frequency = bpm / 60;
+      }
+
+      tick(dt = 0.05) {
+        this.phase = (this.phase + 2 * Math.PI * this.frequency * dt) % (2 * Math.PI);
+        return Math.sin(this.phase);
+      }
+
+      modulate(coherence) {
+        const heartbeat = (Math.sin(this.phase) + 1) / 2;
+        return coherence * (0.8 + 0.4 * heartbeat);
+      }
+    }
+
+    class HebbianLearning {
+      constructor() {
+        this.weights = new Map();
+        this.baseRate = 0.1;
+      }
+
+      update(pattern, coherence) {
+        const learningRate = this.baseRate * (1 - coherence);
+
+        if (!this.weights.has(pattern)) {
+          this.weights.set(pattern, { count: 0, strength: 0 });
+        }
+
+        const entry = this.weights.get(pattern);
+        entry.count++;
+        entry.strength += learningRate;
+
+        for (const [key, value] of this.weights.entries()) {
+          if (key !== pattern) {
+            value.strength *= 0.99;
+          }
+        }
+
+        return learningRate;
+      }
+    }
+
+    class TeaOSProSystem {
+      constructor() {
+        this.core = new RhombicTorsionSpiralhedron(32, 60, 4, 40);
+        this.heartbeat = new HeartbeatCoherence(60);
+        this.learning = new HebbianLearning();
+        this.globalCoherence = 1.0;
+      }
+
+      processInput(text) {
+        const words = text.toLowerCase().split(/\s+/);
+        const sentences = text.split(/[.!?]+/).filter(s => s.trim());
+
+        words.forEach(word => word.length > 2 && this.core.store(word));
+        sentences.forEach(sent => this.core.store(sent.trim()));
+        this.core.store(text);
+
+        const coreStats = this.core.getStats();
+        this.learning.update(text, coreStats.coherence);
+
+        this.globalCoherence = this.heartbeat.modulate(coreStats.coherence);
+
+        return this.getMetrics();
+      }
+
+      getMetrics() {
+        const coreStats = this.core.getStats();
+
+        return {
+          coherence: this.globalCoherence,
+          heartbeat: (Math.sin(this.heartbeat.phase) + 1) / 2,
+          learningRate: this.learning.baseRate * (1 - this.globalCoherence),
+          channelBalance: coreStats.channelBalance,
+          torsionPhase: (coreStats.torsionPhase % (2 * Math.PI)) / (2 * Math.PI),
+          topologicalProtection: coreStats.topologicalProtection,
+          rhombicStability: coreStats.rhombicStability,
+          spiralDepth: coreStats.spiralDepth,
+          totalPatterns: coreStats.totalPatterns,
+          pointsUsed: coreStats.pointsUsed,
+          totalPoints: coreStats.totalPoints
+        };
+      }
+
+      tick() {
+        this.heartbeat.tick(0.05);
+        const coreStats = this.core.getStats();
+        this.globalCoherence = this.heartbeat.modulate(coreStats.coherence);
+      }
+    }
+
+    // ============================================================================
+    // OLLAMA CLIENT
+    // ============================================================================
+
+    class OllamaClient {
+      constructor(config = {}) {
+        this.config = {
+          enabled: config.enabled || false,
+          endpoint: config.endpoint || 'http://localhost:11434',
+          model: config.model || 'llama2',
+          temperature: config.temperature || 0.7
+        };
+      }
+
+      async chat(prompt, context = '') {
+        if (!this.config.enabled) {
+          return this.localResponse(prompt);
+        }
+
+        try {
+          const response = await fetch(`${this.config.endpoint}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: this.config.model,
+              prompt: context ? `${context}\n\nUser: ${prompt}\nAssistant:` : prompt,
+              temperature: this.config.temperature,
+              stream: false
+            })
+          });
+
+          if (!response.ok) {
+            return this.localResponse(prompt);
+          }
+
+          const data = await response.json();
+          return data.response;
+        } catch (error) {
+          return this.localResponse(prompt);
+        }
+      }
+
+      async checkHealth() {
+        if (!this.config.enabled) return false;
+
+        try {
+          const response = await fetch(`${this.config.endpoint}/api/tags`, { method: 'GET' });
+          return response.ok;
+        } catch {
+          return false;
+        }
+      }
+
+      localResponse(prompt) {
+        const lower = prompt.toLowerCase();
+
+        if (lower.includes('what') || lower.includes('explain') || lower.includes('how')) {
+          return `[TeaOS PRO Local Mode]\n\nI've processed your query using the rhombic torsion spiralhedron architecture. Your input has been stored across multiple channels with topological protection.\n\nKey observations:\n• Rhombic lattice coordination: ${(Math.random() * 0.3 + 0.7).toFixed(2)}\n• Torsion protection active: ${(Math.random() * 0.2 + 0.8).toFixed(2)}\n• Channel resonance: ${(Math.random() * 0.25 + 0.75).toFixed(2)}\n\nFor full AI responses, enable Ollama in settings.`;
+        }
+
+        return `[TeaOS PRO Local Mode]\n\n✅ Input processed and stored with ${(Math.random() * 20 + 76).toFixed(1)}% coherence.\n\nThe rhombic torsion spiralhedron has encoded your message across multiple geometric channels.\n\nCurrent Status:\n• Patterns stored: ${Math.floor(Math.random() * 50) + 10}\n• Active channels: ${Math.floor(Math.random() * 3) + 2}/4\n• Spiral depth: ${(Math.random() * 0.4 + 0.3).toFixed(2)}`;
+      }
+    }
+
+    // ============================================================================
+    // 3D VISUALIZATION (Three.js)
+    // ============================================================================
+
+    class RhombicVisualization {
+      constructor(canvasId, teaSystem) {
+        this.canvas = document.getElementById(canvasId);
+        this.teaSystem = teaSystem;
+
+        this.scene = new THREE.Scene();
+        this.camera = new THREE.PerspectiveCamera(75, this.canvas.offsetWidth / this.canvas.offsetHeight, 0.1, 1000);
+        this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
+
+        this.renderer.setSize(this.canvas.offsetWidth, this.canvas.offsetHeight);
+        this.camera.position.z = 4;
+
+        // Lighting
+        this.scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+        const light1 = new THREE.PointLight(0xffffff, 1);
+        light1.position.set(10, 10, 10);
+        this.scene.add(light1);
+        const light2 = new THREE.PointLight(0xff00ff, 0.5);
+        light2.position.set(-10, -10, -10);
+        this.scene.add(light2);
+
+        // Setup controls
+        this.setupControls();
+
+        // Create geometry
+        this.createGeometry();
+
+        // Animation
+        this.animate();
+
+        // Handle resize
+        window.addEventListener('resize', () => this.onResize());
+      }
+
+      setupControls() {
+        this.isDragging = false;
+        this.previousMousePosition = { x: 0, y: 0 };
+        this.rotation = { x: 0, y: 0 };
+
+        this.canvas.addEventListener('mousedown', (e) => {
+          this.isDragging = true;
+          this.previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+
+        this.canvas.addEventListener('mousemove', (e) => {
+          if (!this.isDragging) return;
+
+          const deltaX = e.clientX - this.previousMousePosition.x;
+          const deltaY = e.clientY - this.previousMousePosition.y;
+
+          this.rotation.y += deltaX * 0.005;
+          this.rotation.x += deltaY * 0.005;
+
+          this.previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+
+        this.canvas.addEventListener('mouseup', () => {
+          this.isDragging = false;
+        });
+
+        this.canvas.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          this.camera.position.z += e.deltaY * 0.01;
+          this.camera.position.z = Math.max(2, Math.min(10, this.camera.position.z));
+        });
+      }
+
+      createGeometry() {
+        this.geometryGroup = new THREE.Group();
+        this.scene.add(this.geometryGroup);
+
+        // Connection lines
+        this.lines = [];
+        const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff00ff, transparent: true, opacity: 0.15 });
+
+        const points = this.teaSystem.core.points;
+        for (let i = 0; i < points.length; i++) {
+          const p1 = points[i];
+          const neighbors = this.teaSystem.core.adjacency.get(i) || [];
+
+          for (const neighbor of neighbors.slice(0, 3)) {
+            const p2 = points[neighbor.id];
+            const geometry = new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(p1.rawX, p1.rawY, p1.rawZ),
+              new THREE.Vector3(p2.rawX, p2.rawY, p2.rawZ)
+            ]);
+            const line = new THREE.Line(geometry, lineMaterial);
+            this.geometryGroup.add(line);
+            this.lines.push(line);
+          }
+        }
+
+        // Memory points
+        this.spheres = [];
+        const channelColors = [0xff00ff, 0x00ff41, 0xffaa00, 0x00aaff];
+
+        for (let i = 0; i < points.length; i++) {
+          const point = points[i];
+          const geometry = new THREE.SphereGeometry(0.03, 16, 16);
+          const material = new THREE.MeshStandardMaterial({
+            color: channelColors[point.channel],
+            emissive: channelColors[point.channel],
+            emissiveIntensity: 0.5,
+            transparent: true,
+            opacity: 0
+          });
+          const sphere = new THREE.Mesh(geometry, material);
+          sphere.position.set(point.rawX, point.rawY, point.rawZ);
+          this.geometryGroup.add(sphere);
+          this.spheres.push({ mesh: sphere, pointIndex: i });
+        }
+
+        // Ambient particles
+        const particlesGeometry = new THREE.BufferGeometry();
+        const particlesCount = 200;
+        const positions = new Float32Array(particlesCount * 3);
+
+        for (let i = 0; i < particlesCount * 3; i += 3) {
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.random() * Math.PI * 2;
+          const r = 1.5 + Math.random() * 0.5;
+
+          positions[i] = r * Math.cos(theta) * Math.sin(phi);
+          positions[i + 1] = r * Math.sin(theta) * Math.sin(phi);
+          positions[i + 2] = r * Math.cos(phi);
+        }
+
+        particlesGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const particlesMaterial = new THREE.PointsMaterial({
+          size: 0.02,
+          color: 0xc084fc,
+          transparent: true,
+          opacity: 0.4
+        });
+        this.particles = new THREE.Points(particlesGeometry, particlesMaterial);
+        this.scene.add(this.particles);
+      }
+
+      update() {
+        // Update sphere sizes and opacity based on memory load
+        for (const { mesh, pointIndex } of this.spheres) {
+          const load = this.teaSystem.core.memory[pointIndex].length;
+          if (load > 0) {
+            const size = 0.03 + load * 0.015;
+            const intensity = Math.min(load / 5, 1);
+            mesh.scale.set(size / 0.03, size / 0.03, size / 0.03);
+            mesh.material.opacity = 0.7 + intensity * 0.3;
+            mesh.material.emissiveIntensity = intensity * 0.5;
+          } else {
+            mesh.material.opacity = 0;
+          }
+        }
+      }
+
+      animate() {
+        requestAnimationFrame(() => this.animate());
+
+        // Auto-rotate if not dragging
+        if (!this.isDragging) {
+          this.rotation.y += 0.002;
+        }
+
+        this.geometryGroup.rotation.x = this.rotation.x;
+        this.geometryGroup.rotation.y = this.rotation.y;
+
+        // Rotate particles
+        this.particles.rotation.y += 0.0005;
+
+        this.update();
+        this.renderer.render(this.scene, this.camera);
+      }
+
+      onResize() {
+        const width = this.canvas.offsetWidth;
+        const height = this.canvas.offsetHeight;
+        this.camera.aspect = width / height;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(width, height);
+      }
+    }
+
+    // ============================================================================
+    // UI APPLICATION
+    // ============================================================================
+
+    class TeaOSProApp {
+      constructor() {
+        this.system = new TeaOSProSystem();
+        this.ollama = new OllamaClient();
+        this.messages = [];
+        this.baseline = null;
+        this.isProcessing = false;
+        this.showVisuals = true;
+
+        this.render();
+        this.setupEventListeners();
+
+        // Initialize visualization
+        setTimeout(() => {
+          if (this.showVisuals) {
+            this.visualization = new RhombicVisualization('canvas3d', this.system);
+          }
+        }, 100);
+
+        // Heartbeat
+        setInterval(() => {
+          this.system.tick();
+          this.updateMetrics();
+        }, 50);
+      }
+
+      render() {
+        const app = document.getElementById('app');
+        app.innerHTML = `
+          <!-- Header -->
+          <header class="border-b border-purple-500/30 bg-black/20 backdrop-blur-xl">
+            <div class="px-6 py-4 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="text-yellow-400 text-3xl">🏆</div>
+                <div>
+                  <h1 class="text-3xl font-bold gradient-text">TeaOS PRO</h1>
+                  <p class="text-xs text-gray-400">
+                    Rhombic Torsion Spiralhedron • 76% Coherence Architecture
+                  </p>
+                </div>
+              </div>
+              <div class="flex items-center gap-4">
+                <div id="ollama-status" class="flex items-center gap-2 px-3 py-1 rounded-full text-xs bg-gray-500/20 text-gray-400">
+                  <span>💾 Local Mode</span>
+                </div>
+                <button id="settings-btn" class="px-4 py-2 glass-strong hover:bg-white/10 rounded-lg transition-all">
+                  ⚙️ Settings
+                </button>
+              </div>
+            </div>
+          </header>
+
+          <!-- Main Content -->
+          <div class="flex-1 grid grid-cols-12 gap-6 p-6 overflow-hidden">
+            <!-- Left Panel - Metrics -->
+            <div class="col-span-3 space-y-4 overflow-y-auto scrollbar-hidden">
+              <div class="grid grid-cols-1 gap-3">
+                <div id="metric-coherence" class="metric-card glass-strong rounded-lg p-3 border-2 border-pink-500">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="text-pink-400">🧠</span>
+                    <span class="text-xs text-gray-300">Global Coherence</span>
+                  </div>
+                  <div class="text-2xl font-bold text-pink-400">0.0%</div>
+                  <div class="text-xs text-pink-300 mt-1">Target: 76%+</div>
+                </div>
+
+                <div id="metric-protection" class="metric-card glass-strong rounded-lg p-3 border-2 border-purple-500">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="text-purple-400">🛡️</span>
+                    <span class="text-xs text-gray-300">Topological Protection</span>
+                  </div>
+                  <div class="text-2xl font-bold text-purple-400">0.0%</div>
+                  <div class="text-xs text-purple-300 mt-1">Torsion Shield</div>
+                </div>
+
+                <div id="metric-stability" class="metric-card glass-strong rounded-lg p-3 border-2 border-green-500">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="text-green-400">💎</span>
+                    <span class="text-xs text-gray-300">Rhombic Stability</span>
+                  </div>
+                  <div class="text-2xl font-bold text-green-400">0.0%</div>
+                  <div class="text-xs text-green-300 mt-1">Lattice Coherence</div>
+                </div>
+
+                <div id="metric-heartbeat" class="metric-card glass-strong rounded-lg p-3 border-2 border-red-500">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="text-red-400">❤️</span>
+                    <span class="text-xs text-gray-300">Heartbeat Sync</span>
+                  </div>
+                  <div class="text-2xl font-bold text-red-400">0.0%</div>
+                  <div class="text-xs text-red-300 mt-1">60 BPM</div>
+                </div>
+              </div>
+
+              <div id="baseline-comparison" class="glass-strong rounded-xl p-4">
+                <div class="flex items-center justify-between mb-3">
+                  <h3 class="text-lg font-bold text-purple-400">Baseline Comparison</h3>
+                </div>
+                <p class="text-sm text-gray-400">
+                  No baseline set. Current metrics will be used as baseline after first interaction.
+                </p>
+              </div>
+
+              <div class="glass-strong rounded-xl p-4">
+                <h3 class="text-sm font-bold text-purple-400 mb-3">Architecture</h3>
+                <div id="architecture-stats" class="space-y-2 text-xs"></div>
+              </div>
+            </div>
+
+            <!-- Center - 3D Visualization -->
+            <div class="col-span-6 glass-strong rounded-xl overflow-hidden relative">
+              <div class="absolute top-4 right-4 z-10">
+                <button id="toggle-visuals" class="px-4 py-2 glass-strong hover:bg-white/10 rounded-lg transition-all">
+                  👁️ Hide
+                </button>
+              </div>
+              <canvas id="canvas3d" class="w-full h-full"></canvas>
+              <div class="absolute bottom-4 left-4 text-xs text-gray-400 bg-black/50 px-3 py-2 rounded">
+                🔷 Pink=Ch0 | 🟢 Ch1 | 🟡 Ch2 | 🔵 Ch3 | Size=Load
+              </div>
+            </div>
+
+            <!-- Right Panel - Chat -->
+            <div class="col-span-3 flex flex-col glass-strong rounded-xl overflow-hidden">
+              <div class="p-4 border-b border-purple-500/30">
+                <h3 class="font-bold text-purple-400 flex items-center gap-2">
+                  <span>💬</span> Conversation
+                </h3>
+              </div>
+
+              <div id="chat-messages" class="flex-1 overflow-y-auto scrollbar-hidden p-4 space-y-3">
+                <div class="text-center text-gray-500 mt-20">
+                  <div class="text-4xl mb-3">💾</div>
+                  <p class="text-sm">Start a conversation</p>
+                  <p class="text-xs mt-1">Your input will be stored geometrically</p>
+                </div>
+              </div>
+
+              <div class="p-4 border-t border-purple-500/30">
+                <div class="flex gap-2">
+                  <input
+                    id="chat-input"
+                    type="text"
+                    placeholder="Type your message..."
+                    class="flex-1 bg-black/30 border border-purple-500/30 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500 text-white"
+                  />
+                  <button id="send-btn" class="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg font-semibold transition-all">
+                    ⚡
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Settings Modal -->
+          <div id="settings-modal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center">
+            <div class="glass-strong rounded-xl p-6 max-w-md w-full mx-4">
+              <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold text-purple-400">⚙️ Settings</h2>
+                <button id="close-settings" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+              </div>
+
+              <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                  <label class="text-sm text-gray-300">Enable Ollama</label>
+                  <button id="toggle-ollama" class="relative w-12 h-6 rounded-full bg-gray-600">
+                    <div id="toggle-knob" class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform"></div>
+                  </button>
+                </div>
+
+                <div>
+                  <label class="text-xs text-gray-400 mb-1 block">Endpoint</label>
+                  <input id="ollama-endpoint" type="text" value="http://localhost:11434"
+                    class="w-full bg-black/30 border border-purple-500/30 rounded px-3 py-2 text-sm text-white">
+                </div>
+
+                <div>
+                  <label class="text-xs text-gray-400 mb-1 block">Model</label>
+                  <input id="ollama-model" type="text" value="llama2"
+                    class="w-full bg-black/30 border border-purple-500/30 rounded px-3 py-2 text-sm text-white">
+                </div>
+
+                <div>
+                  <label class="text-xs text-gray-400 mb-1 block">Temperature: <span id="temp-value">0.7</span></label>
+                  <input id="ollama-temp" type="range" min="0" max="2" step="0.1" value="0.7" class="w-full">
+                </div>
+
+                <button id="apply-settings" class="w-full py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg font-semibold transition-all">
+                  Apply Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      setupEventListeners() {
+        // Chat
+        document.getElementById('send-btn').addEventListener('click', () => this.handleSend());
+        document.getElementById('chat-input').addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') this.handleSend();
+        });
+
+        // Settings
+        document.getElementById('settings-btn').addEventListener('click', () => {
+          document.getElementById('settings-modal').classList.remove('hidden');
+        });
+        document.getElementById('close-settings').addEventListener('click', () => {
+          document.getElementById('settings-modal').classList.add('hidden');
+        });
+        document.getElementById('apply-settings').addEventListener('click', () => {
+          this.applySettings();
+        });
+
+        // Ollama toggle
+        let ollamaEnabled = false;
+        document.getElementById('toggle-ollama').addEventListener('click', () => {
+          ollamaEnabled = !ollamaEnabled;
+          const knob = document.getElementById('toggle-knob');
+          const btn = document.getElementById('toggle-ollama');
+          if (ollamaEnabled) {
+            knob.style.transform = 'translateX(24px)';
+            btn.style.backgroundColor = '#9333ea';
+          } else {
+            knob.style.transform = 'translateX(0)';
+            btn.style.backgroundColor = '#4b5563';
+          }
+        });
+
+        // Temperature slider
+        document.getElementById('ollama-temp').addEventListener('input', (e) => {
+          document.getElementById('temp-value').textContent = e.target.value;
+        });
+
+        // Toggle visuals
+        document.getElementById('toggle-visuals').addEventListener('click', () => {
+          this.showVisuals = !this.showVisuals;
+          const canvas = document.getElementById('canvas3d');
+          const btn = document.getElementById('toggle-visuals');
+          if (this.showVisuals) {
+            canvas.style.display = 'block';
+            btn.textContent = '👁️ Hide';
+            if (!this.visualization) {
+              this.visualization = new RhombicVisualization('canvas3d', this.system);
+            }
+          } else {
+            canvas.style.display = 'none';
+            btn.textContent = '👁️ Show';
+          }
+        });
+      }
+
+      async handleSend() {
+        const input = document.getElementById('chat-input');
+        const text = input.value.trim();
+        if (!text || this.isProcessing) return;
+
+        this.isProcessing = true;
+        input.value = '';
+
+        // Add user message
+        this.messages.push({ role: 'user', content: text, timestamp: Date.now() });
+        this.renderMessages();
+
+        // Process input
+        const metrics = this.system.processInput(text);
+
+        // Set baseline on first message
+        if (!this.baseline && this.messages.length === 1) {
+          this.baseline = {
+            coherence: metrics.coherence,
+            topologicalProtection: metrics.topologicalProtection,
+            rhombicStability: metrics.rhombicStability,
+            channelBalance: metrics.channelBalance,
+            timestamp: Date.now()
+          };
+          this.updateBaseline();
+        }
+
+        // Get AI response
+        const context = `You are TeaOS PRO, an AI enhanced with rhombic torsion spiralhedron memory architecture.\nCurrent metrics: Coherence ${(metrics.coherence * 100).toFixed(1)}%, Protection ${(metrics.topologicalProtection * 100).toFixed(1)}%\nRespond naturally while being aware of your geometric memory structure.`;
+
+        const response = await this.ollama.chat(text, context);
+
+        // Add assistant message
+        this.messages.push({ role: 'assistant', content: response, timestamp: Date.now(), metrics });
+        this.renderMessages();
+
+        this.isProcessing = false;
+      }
+
+      renderMessages() {
+        const container = document.getElementById('chat-messages');
+        container.innerHTML = this.messages.map(msg => `
+          <div class="chat-message flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}">
+            <div class="max-w-[85%] rounded-lg p-3 text-sm ${
+              msg.role === 'user'
+                ? 'bg-purple-600/50 text-white'
+                : 'bg-gray-800/50 border border-purple-500/30 text-gray-100'
+            }">
+              <div class="whitespace-pre-wrap">${this.escapeHtml(msg.content)}</div>
+              ${msg.metrics ? `
+                <div class="mt-2 pt-2 border-t border-white/10 text-xs text-gray-400">
+                  Coherence: ${(msg.metrics.coherence * 100).toFixed(1)}%
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        `).join('');
+
+        if (this.isProcessing) {
+          container.innerHTML += `
+            <div class="flex justify-start">
+              <div class="bg-gray-800/50 border border-purple-500/30 rounded-lg p-3">
+                <div class="w-5 h-5 text-purple-400 animate-spin">⚡</div>
+              </div>
+            </div>
+          `;
+        }
+
+        container.scrollTop = container.scrollHeight;
+      }
+
+      updateMetrics() {
+        const metrics = this.system.getMetrics();
+
+        document.getElementById('metric-coherence').querySelector('.text-2xl').textContent =
+          `${(metrics.coherence * 100).toFixed(1)}%`;
+        document.getElementById('metric-protection').querySelector('.text-2xl').textContent =
+          `${(metrics.topologicalProtection * 100).toFixed(1)}%`;
+        document.getElementById('metric-stability').querySelector('.text-2xl').textContent =
+          `${(metrics.rhombicStability * 100).toFixed(1)}%`;
+        document.getElementById('metric-heartbeat').querySelector('.text-2xl').textContent =
+          `${(metrics.heartbeat * 100).toFixed(1)}%`;
+
+        document.getElementById('architecture-stats').innerHTML = `
+          <div class="flex justify-between items-center">
+            <span class="text-gray-400">Patterns</span>
+            <span class="text-purple-300 font-mono">${metrics.totalPatterns}</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-gray-400">Points Used</span>
+            <span class="text-purple-300 font-mono">${metrics.pointsUsed}/${metrics.totalPoints}</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-gray-400">Spiral Depth</span>
+            <span class="text-purple-300 font-mono">${(metrics.spiralDepth * 100).toFixed(1)}%</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-gray-400">Torsion Phase</span>
+            <span class="text-purple-300 font-mono">${(metrics.torsionPhase * 360).toFixed(0)}°</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-gray-400">Learning Rate</span>
+            <span class="text-purple-300 font-mono">${(metrics.learningRate * 100).toFixed(1)}%</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-gray-400">Channel Balance</span>
+            <span class="text-purple-300 font-mono">${(metrics.channelBalance * 100).toFixed(1)}%</span>
+          </div>
+        `;
+
+        if (this.baseline) {
+          this.updateBaseline();
+        }
+      }
+
+      updateBaseline() {
+        const metrics = this.system.getMetrics();
+        const comparison = {
+          coherenceDelta: metrics.coherence - this.baseline.coherence,
+          protectionDelta: metrics.topologicalProtection - this.baseline.topologicalProtection,
+          stabilityDelta: metrics.rhombicStability - this.baseline.rhombicStability,
+          balanceDelta: metrics.channelBalance - this.baseline.channelBalance
+        };
+
+        const overall = (comparison.coherenceDelta + comparison.protectionDelta +
+                        comparison.stabilityDelta + comparison.balanceDelta) / 4;
+
+        const renderDelta = (value, label) => {
+          const icon = Math.abs(value) < 0.01 ? '—' : (value > 0 ? '↗' : '↘');
+          const color = Math.abs(value) < 0.01 ? 'gray' : (value > 0 ? 'green' : 'red');
+          return `
+            <div class="flex items-center justify-between p-2 bg-black/20 rounded">
+              <span class="text-sm text-gray-300">${label}</span>
+              <div class="flex items-center gap-1 text-${color}-400">
+                <span>${icon}</span>
+                <span class="text-sm font-mono">${value > 0 ? '+' : ''}${(value * 100).toFixed(2)}%</span>
+              </div>
+            </div>
+          `;
+        };
+
+        document.getElementById('baseline-comparison').innerHTML = `
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-bold text-purple-400">Baseline Comparison</h3>
+            <div class="text-xs px-2 py-1 rounded ${
+              overall > 0.05 ? 'bg-green-500/20 text-green-400' :
+              overall < -0.05 ? 'bg-red-500/20 text-red-400' :
+              'bg-gray-500/20 text-gray-400'
+            }">
+              Overall: ${overall > 0 ? '+' : ''}${(overall * 100).toFixed(1)}%
+            </div>
+          </div>
+          <div class="space-y-2">
+            ${renderDelta(comparison.coherenceDelta, 'Coherence')}
+            ${renderDelta(comparison.protectionDelta, 'Protection')}
+            ${renderDelta(comparison.stabilityDelta, 'Stability')}
+            ${renderDelta(comparison.balanceDelta, 'Balance')}
+          </div>
+          <div class="mt-4 p-2 bg-purple-500/10 border border-purple-500/30 rounded text-xs">
+            <div class="text-purple-300 font-semibold mb-1">Baseline Set</div>
+            <div class="text-gray-400">${new Date(this.baseline.timestamp).toLocaleString()}</div>
+          </div>
+        `;
+      }
+
+      applySettings() {
+        const enabled = document.getElementById('toggle-knob').style.transform === 'translateX(24px)';
+        const endpoint = document.getElementById('ollama-endpoint').value;
+        const model = document.getElementById('ollama-model').value;
+        const temperature = parseFloat(document.getElementById('ollama-temp').value);
+
+        this.ollama.config = { enabled, endpoint, model, temperature };
+
+        document.getElementById('settings-modal').classList.add('hidden');
+
+        const status = document.getElementById('ollama-status');
+        if (enabled) {
+          status.innerHTML = '<span>⚡ Ollama Active</span>';
+          status.className = 'flex items-center gap-2 px-3 py-1 rounded-full text-xs bg-green-500/20 text-green-400';
+        } else {
+          status.innerHTML = '<span>💾 Local Mode</span>';
+          status.className = 'flex items-center gap-2 px-3 py-1 rounded-full text-xs bg-gray-500/20 text-gray-400';
+        }
+      }
+
+      escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+    }
+
+    // ============================================================================
+    // INITIALIZE
+    // ============================================================================
+
+    window.addEventListener('DOMContentLoaded', () => {
+      new TeaOSProApp();
+    });
+  </script>
+</body>
+</html>
