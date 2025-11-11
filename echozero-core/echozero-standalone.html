@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EchoZero - 3D Resonant AI Visualization</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #fff;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo-icon {
+            font-size: 2rem;
+            animation: spin 8s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 0.75rem;
+            color: #94a3b8;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+            font-size: 0.875rem;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Layout */
+        .container {
+            display: flex;
+            height: 100vh;
+            padding-top: 70px;
+        }
+
+        .sidebar {
+            width: 380px;
+            padding: 1.5rem;
+            overflow-y: auto;
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(10px);
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .main-canvas {
+            flex: 1;
+            position: relative;
+        }
+
+        #three-canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Glass card */
+        .card {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card h3 {
+            font-size: 1.125rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Input */
+        textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 1rem;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 0.875rem;
+            resize: vertical;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #6366f1;
+        }
+
+        /* Buttons */
+        .btn-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.5rem;
+            margin: 1rem 0;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+
+        .btn-secondary {
+            background: #475569;
+            color: #fff;
+        }
+
+        .btn-secondary:hover {
+            background: #64748b;
+            transform: translateY(-2px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: #fff;
+            padding: 1rem;
+            font-size: 1rem;
+            font-weight: 600;
+            margin-top: 1rem;
+            width: 100%;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.3);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Mode selector */
+        .mode-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+        }
+
+        .mode-btn {
+            padding: 1rem;
+            background: rgba(71, 85, 105, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+
+        .mode-btn:hover {
+            border-color: #6366f1;
+            transform: scale(1.05);
+        }
+
+        .mode-btn.active {
+            border-color: #6366f1;
+            background: rgba(99, 102, 241, 0.2);
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+        }
+
+        .mode-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .mode-label {
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+
+        .mode-desc {
+            font-size: 0.7rem;
+            color: #94a3b8;
+            margin-top: 0.25rem;
+        }
+
+        /* Metrics */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .metric-card {
+            padding: 1rem;
+            background: rgba(15, 23, 42, 0.5);
+            border: 2px solid;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .metric-card.good { border-color: #10b981; background: rgba(16, 185, 129, 0.1); }
+        .metric-card.marginal { border-color: #f59e0b; background: rgba(245, 158, 11, 0.1); }
+        .metric-card.poor { border-color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+        .metric-card.neutral { border-color: #6366f1; background: rgba(99, 102, 241, 0.1); }
+
+        .metric-label {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #6366f1 0%, #ec4899 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Loading spinner */
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin-fast 0.8s linear infinite;
+        }
+
+        @keyframes spin-fast {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(30, 41, 59, 0.5);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+
+        /* Tooltips */
+        .tooltip {
+            position: relative;
+            cursor: help;
+        }
+
+        .info-icon {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            background: rgba(99, 102, 241, 0.3);
+            border-radius: 50%;
+            text-align: center;
+            line-height: 16px;
+            font-size: 0.7rem;
+            color: #6366f1;
+        }
+
+        /* Controls overlay */
+        .controls-info {
+            position: absolute;
+            bottom: 1rem;
+            left: 1rem;
+            font-size: 0.75rem;
+            color: #94a3b8;
+            background: rgba(15, 23, 42, 0.8);
+            padding: 0.75rem;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">🌀</div>
+            <div>
+                <div class="title">EchoZero</div>
+                <div class="subtitle">Resonant AI Visualization v1.0.0</div>
+            </div>
+        </div>
+        <div class="status">
+            <div class="status-item">
+                <div class="status-dot"></div>
+                <span>Standalone Mode</span>
+            </div>
+            <div class="status-item">
+                <span>Baseline: <strong id="baseline">0.2634</strong></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <!-- Input Card -->
+            <div class="card">
+                <h3>🌀 Input Text</h3>
+                <textarea id="input-text" placeholder="Enter text to analyze...">I feel energized and focused today</textarea>
+
+                <div class="btn-grid">
+                    <button class="btn btn-secondary" onclick="setSample(0)">Sample 1</button>
+                    <button class="btn btn-secondary" onclick="setSample(1)">Sample 2</button>
+                    <button class="btn btn-secondary" onclick="setSample(2)">Sample 3</button>
+                    <button class="btn btn-secondary" onclick="setSample(3)">Sample 4</button>
+                    <button class="btn btn-secondary" onclick="setSample(4)">Sample 5</button>
+                </div>
+
+                <button class="btn btn-primary" onclick="processText()" id="process-btn">
+                    🚀 Warp Through EchoZero
+                </button>
+            </div>
+
+            <!-- Visualization Mode -->
+            <div class="card">
+                <h3>🎨 Visualization Mode</h3>
+                <div class="mode-grid">
+                    <div class="mode-btn active" onclick="setMode('spheres')">
+                        <div class="mode-icon">🔮</div>
+                        <div class="mode-label">8-Spheres</div>
+                        <div class="mode-desc">Toroidal resonance</div>
+                    </div>
+                    <div class="mode-btn" onclick="setMode('attention')">
+                        <div class="mode-icon">🧠</div>
+                        <div class="mode-label">Attention</div>
+                        <div class="mode-desc">3D network graph</div>
+                    </div>
+                    <div class="mode-btn" onclick="setMode('phase')">
+                        <div class="mode-icon">🌊</div>
+                        <div class="mode-label">Phase Field</div>
+                        <div class="mode-desc">Wave surface</div>
+                    </div>
+                    <div class="mode-btn" onclick="setMode('particles')">
+                        <div class="mode-icon">✨</div>
+                        <div class="mode-label">Particles</div>
+                        <div class="mode-desc">Flowing energy</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Metrics -->
+            <div class="card" id="metrics-panel" style="display: none;">
+                <h3>📊 Metrics</h3>
+                <div class="metrics-grid">
+                    <div class="metric-card neutral">
+                        <div class="metric-label">
+                            <span>Valence</span>
+                            <span class="info-icon tooltip" title="Emotional polarity: -1 to +1">?</span>
+                        </div>
+                        <div class="metric-value" id="metric-valence">-</div>
+                    </div>
+                    <div class="metric-card neutral">
+                        <div class="metric-label">
+                            <span>Arousal</span>
+                            <span class="info-icon tooltip" title="Energy level: 0 to 1">?</span>
+                        </div>
+                        <div class="metric-value" id="metric-arousal">-</div>
+                    </div>
+                    <div class="metric-card neutral">
+                        <div class="metric-label">
+                            <span>Coherence</span>
+                            <span class="info-icon tooltip" title="PLV × RMS">?</span>
+                        </div>
+                        <div class="metric-value" id="metric-coherence">-</div>
+                    </div>
+                    <div class="metric-card neutral">
+                        <div class="metric-label">
+                            <span>SNR</span>
+                            <span id="snr-emoji">🟡</span>
+                        </div>
+                        <div class="metric-value" id="metric-snr">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Canvas -->
+        <div class="main-canvas">
+            <canvas id="three-canvas"></canvas>
+            <div class="controls-info">
+                🖱️ <strong>Drag</strong> to rotate • <strong>Scroll</strong> to zoom • <strong>Right-click</strong> to pan
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r158/three.min.js"></script>
+
+    <script>
+        // Sample texts
+        const samples = [
+            "I feel energized and focused today",
+            "I'm anxious about the presentation tomorrow",
+            "Everything feels neutral and calm",
+            "I'm excited about the new opportunity",
+            "This situation makes me feel overwhelmed and stressed"
+        ];
+
+        let scene, camera, renderer, controls;
+        let currentMode = 'spheres';
+        let visualizationObjects = [];
+        let animationId;
+
+        // Initialize Three.js scene
+        function initThree() {
+            const canvas = document.getElementById('three-canvas');
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0f172a);
+            scene.fog = new THREE.Fog(0x0f172a, 10, 50);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+            camera.position.set(0, 0, 15);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+            renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+            scene.add(ambientLight);
+
+            const pointLight1 = new THREE.PointLight(0x6366f1, 1, 50);
+            pointLight1.position.set(10, 10, 10);
+            scene.add(pointLight1);
+
+            const pointLight2 = new THREE.PointLight(0xec4899, 0.5, 50);
+            pointLight2.position.set(-10, -10, -10);
+            scene.add(pointLight2);
+
+            // Stars
+            const starsGeometry = new THREE.BufferGeometry();
+            const starsMaterial = new THREE.PointsMaterial({ color: 0x6366f1, size: 0.1, transparent: true, opacity: 0.6 });
+
+            const starsVertices = [];
+            for (let i = 0; i < 5000; i++) {
+                const x = (Math.random() - 0.5) * 200;
+                const y = (Math.random() - 0.5) * 200;
+                const z = (Math.random() - 0.5) * 200;
+                starsVertices.push(x, y, z);
+            }
+
+            starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVertices, 3));
+            const stars = new THREE.Points(starsGeometry, starsMaterial);
+            scene.add(stars);
+
+            // Mouse controls
+            setupControls();
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize);
+
+            // Start animation
+            animate();
+
+            // Initialize visualization
+            createVisualization(currentMode);
+        }
+
+        function setupControls() {
+            let isDragging = false;
+            let previousMousePosition = { x: 0, y: 0 };
+            let rotation = { x: 0, y: 0 };
+
+            const canvas = renderer.domElement;
+
+            canvas.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    const deltaX = e.clientX - previousMousePosition.x;
+                    const deltaY = e.clientY - previousMousePosition.y;
+
+                    rotation.y += deltaX * 0.005;
+                    rotation.x += deltaY * 0.005;
+
+                    previousMousePosition = { x: e.clientX, y: e.clientY };
+                }
+            });
+
+            canvas.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                camera.position.z += e.deltaY * 0.01;
+                camera.position.z = Math.max(5, Math.min(30, camera.position.z));
+            });
+
+            // Store rotation for animation
+            canvas.rotation = rotation;
+        }
+
+        function createVisualization(mode) {
+            // Clear existing objects
+            visualizationObjects.forEach(obj => scene.remove(obj));
+            visualizationObjects = [];
+
+            switch(mode) {
+                case 'spheres':
+                    createEightSpheres();
+                    break;
+                case 'attention':
+                    createAttentionGraph();
+                    break;
+                case 'phase':
+                    createPhaseField();
+                    break;
+                case 'particles':
+                    createParticleSystem();
+                    break;
+            }
+        }
+
+        function createEightSpheres() {
+            const colors = [0xff6b6b, 0xffa500, 0xffd700, 0x90ee90, 0x4ecdc4, 0x6366f1, 0x8b5cf6, 0xec4899];
+            const radius = 4;
+            const height = 6;
+
+            // Create torus
+            const torusGeometry = new THREE.TorusGeometry(radius, 0.2, 16, 100);
+            const torusMaterial = new THREE.MeshStandardMaterial({
+                color: 0x6366f1,
+                transparent: true,
+                opacity: 0.3,
+                emissive: 0x6366f1,
+                emissiveIntensity: 0.5
+            });
+            const torus = new THREE.Mesh(torusGeometry, torusMaterial);
+            scene.add(torus);
+            visualizationObjects.push(torus);
+
+            // Create 8 spheres
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2;
+                const spiralHeight = (i / 8) * height - height / 2;
+
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+
+                // Main sphere
+                const geometry = new THREE.SphereGeometry(0.5, 32, 32);
+                const material = new THREE.MeshStandardMaterial({
+                    color: colors[i],
+                    metalness: 0.5,
+                    roughness: 0.2,
+                    emissive: colors[i],
+                    emissiveIntensity: 0.3
+                });
+                const sphere = new THREE.Mesh(geometry, material);
+                sphere.position.set(x, spiralHeight, z);
+                sphere.userData = { index: i, baseY: spiralHeight, activation: Math.random() };
+                scene.add(sphere);
+                visualizationObjects.push(sphere);
+
+                // Glow
+                const glowGeometry = new THREE.SphereGeometry(0.6, 16, 16);
+                const glowMaterial = new THREE.MeshBasicMaterial({
+                    color: colors[i],
+                    transparent: true,
+                    opacity: 0.2,
+                    side: THREE.BackSide
+                });
+                const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+                glow.position.set(x, spiralHeight, z);
+                sphere.add(glow);
+            }
+        }
+
+        function createAttentionGraph() {
+            const numNodes = 20;
+            const radius = 5;
+
+            // Create nodes
+            for (let i = 0; i < numNodes; i++) {
+                const phi = Math.acos(2 * (i / (numNodes - 1)) - 1);
+                const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+
+                const x = radius * Math.sin(phi) * Math.cos(theta);
+                const y = radius * Math.sin(phi) * Math.sin(theta);
+                const z = radius * Math.cos(phi);
+
+                const geometry = new THREE.SphereGeometry(0.3, 16, 16);
+                const hue = Math.random();
+                const color = new THREE.Color().setHSL(hue, 0.8, 0.6);
+                const material = new THREE.MeshStandardMaterial({
+                    color: color,
+                    emissive: color,
+                    emissiveIntensity: 0.5
+                });
+                const node = new THREE.Mesh(geometry, material);
+                node.position.set(x, y, z);
+                node.userData = { baseScale: 1, pulse: Math.random() * Math.PI * 2 };
+                scene.add(node);
+                visualizationObjects.push(node);
+            }
+
+            // Create some edges
+            for (let i = 0; i < numNodes; i++) {
+                const node1 = visualizationObjects[i];
+                for (let j = i + 1; j < numNodes; j++) {
+                    if (Math.random() < 0.15) {
+                        const node2 = visualizationObjects[j];
+                        const geometry = new THREE.BufferGeometry().setFromPoints([
+                            node1.position,
+                            node2.position
+                        ]);
+                        const material = new THREE.LineBasicMaterial({
+                            color: 0x6366f1,
+                            transparent: true,
+                            opacity: 0.3
+                        });
+                        const line = new THREE.Line(geometry, material);
+                        scene.add(line);
+                        visualizationObjects.push(line);
+                    }
+                }
+            }
+        }
+
+        function createPhaseField() {
+            const size = 10;
+            const segments = 64;
+            const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
+
+            const positions = geometry.attributes.position.array;
+            for (let i = 0; i < positions.length; i += 3) {
+                const x = positions[i];
+                const y = positions[i + 1];
+                const wave = Math.sin(x * 0.5) * Math.cos(y * 0.5) * 2;
+                positions[i + 2] = wave;
+            }
+            geometry.computeVertexNormals();
+
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x6366f1,
+                wireframe: false,
+                side: THREE.DoubleSide
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.userData = { isWave: true, time: 0 };
+            scene.add(mesh);
+            visualizationObjects.push(mesh);
+
+            // Wireframe overlay
+            const wireframe = new THREE.Mesh(
+                geometry,
+                new THREE.MeshBasicMaterial({
+                    color: 0x6366f1,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.3
+                })
+            );
+            wireframe.rotation.x = -Math.PI / 2;
+            scene.add(wireframe);
+            visualizationObjects.push(wireframe);
+        }
+
+        function createParticleSystem() {
+            const particleCount = 3000;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const colors = new Float32Array(particleCount * 3);
+            const velocities = [];
+
+            for (let i = 0; i < particleCount; i++) {
+                positions[i * 3] = (Math.random() - 0.5) * 20;
+                positions[i * 3 + 1] = (Math.random() - 0.5) * 20;
+                positions[i * 3 + 2] = (Math.random() - 0.5) * 20;
+
+                const color = new THREE.Color().setHSL(Math.random(), 0.8, 0.6);
+                colors[i * 3] = color.r;
+                colors[i * 3 + 1] = color.g;
+                colors[i * 3 + 2] = color.b;
+
+                velocities.push({
+                    x: (Math.random() - 0.5) * 0.02,
+                    y: (Math.random() - 0.5) * 0.02,
+                    z: (Math.random() - 0.5) * 0.02
+                });
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({
+                size: 0.1,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            const particles = new THREE.Points(geometry, material);
+            particles.userData = { velocities: velocities };
+            scene.add(particles);
+            visualizationObjects.push(particles);
+        }
+
+        function animate() {
+            animationId = requestAnimationFrame(animate);
+
+            const time = Date.now() * 0.001;
+
+            // Rotate scene based on controls
+            const canvas = renderer.domElement;
+            if (canvas.rotation) {
+                camera.position.x = Math.sin(canvas.rotation.y) * 15;
+                camera.position.z = Math.cos(canvas.rotation.y) * 15;
+                camera.position.y = canvas.rotation.x * 10;
+                camera.lookAt(scene.position);
+            }
+
+            // Update visualizations
+            visualizationObjects.forEach(obj => {
+                if (obj.userData.index !== undefined) {
+                    // Sphere pulsing
+                    const scale = 1 + obj.userData.activation * 0.3 * Math.sin(time * 2);
+                    obj.scale.setScalar(scale);
+                    obj.rotation.y += (obj.userData.index + 1) * 0.002;
+                }
+
+                if (obj.userData.pulse !== undefined) {
+                    // Node pulsing
+                    const scale = 1 + 0.3 * Math.sin(time * 3 + obj.userData.pulse);
+                    obj.scale.setScalar(scale);
+                }
+
+                if (obj.userData.isWave) {
+                    // Wave animation
+                    const positions = obj.geometry.attributes.position.array;
+                    for (let i = 0; i < positions.length; i += 3) {
+                        const x = positions[i];
+                        const y = positions[i + 1];
+                        const wave = Math.sin(x * 0.5 + time) * Math.cos(y * 0.5 + time) * 2;
+                        positions[i + 2] = wave;
+                    }
+                    obj.geometry.attributes.position.needsUpdate = true;
+                    obj.geometry.computeVertexNormals();
+                }
+
+                if (obj.userData.velocities) {
+                    // Particle motion
+                    const positions = obj.geometry.attributes.position.array;
+                    const velocities = obj.userData.velocities;
+                    for (let i = 0; i < positions.length; i += 3) {
+                        positions[i] += velocities[i / 3].x;
+                        positions[i + 1] += velocities[i / 3].y;
+                        positions[i + 2] += velocities[i / 3].z;
+
+                        // Wrap around
+                        if (Math.abs(positions[i]) > 10) velocities[i / 3].x *= -1;
+                        if (Math.abs(positions[i + 1]) > 10) velocities[i / 3].y *= -1;
+                        if (Math.abs(positions[i + 2]) > 10) velocities[i / 3].z *= -1;
+                    }
+                    obj.geometry.attributes.position.needsUpdate = true;
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            const canvas = document.getElementById('three-canvas');
+            camera.aspect = canvas.clientWidth / canvas.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+        }
+
+        // UI Functions
+        function setSample(index) {
+            document.getElementById('input-text').value = samples[index];
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+
+            // Update button states
+            document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+            event.currentTarget.classList.add('active');
+
+            // Recreate visualization
+            createVisualization(mode);
+        }
+
+        function processText() {
+            const text = document.getElementById('input-text').value.trim();
+            if (!text) return;
+
+            const btn = document.getElementById('process-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Processing...';
+
+            // Simulate processing (generate random metrics)
+            setTimeout(() => {
+                const valence = (Math.random() * 2 - 1).toFixed(3);
+                const arousal = Math.random().toFixed(3);
+                const coherence = (Math.random() * 0.5 + 0.3).toFixed(4);
+                const snr = (Math.random() * 6 - 1).toFixed(2);
+
+                // Update metrics
+                document.getElementById('metric-valence').textContent = valence;
+                document.getElementById('metric-arousal').textContent = arousal;
+                document.getElementById('metric-coherence').textContent = coherence;
+                document.getElementById('metric-snr').textContent = snr + ' dB';
+
+                // Update SNR emoji
+                const snrValue = parseFloat(snr);
+                const emoji = snrValue > 3 ? '🟢' : snrValue > 0 ? '🟡' : '🔴';
+                document.getElementById('snr-emoji').textContent = emoji;
+
+                // Update metric card colors
+                const cards = document.querySelectorAll('.metric-card');
+                cards[0].className = 'metric-card ' + (valence > 0.3 ? 'good' : valence < -0.3 ? 'poor' : 'neutral');
+                cards[1].className = 'metric-card ' + (arousal > 0.6 ? 'good' : 'neutral');
+                cards[2].className = 'metric-card ' + (coherence > 0.5 ? 'good' : coherence > 0.3 ? 'marginal' : 'poor');
+                cards[3].className = 'metric-card ' + (snrValue > 3 ? 'good' : snrValue > 0 ? 'marginal' : 'poor');
+
+                // Show metrics panel
+                document.getElementById('metrics-panel').style.display = 'block';
+
+                // Reset button
+                btn.disabled = false;
+                btn.innerHTML = '🚀 Warp Through EchoZero';
+
+                // Update visualization
+                createVisualization(currentMode);
+            }, 1500);
+        }
+
+        // Initialize on load
+        window.addEventListener('load', initThree);
+    </script>
+</body>
+</html>
