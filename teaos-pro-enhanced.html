@@ -1021,12 +1021,32 @@
                 this.memory = Array.from({ length: this.totalPoints }, () => []);
                 this.channelStates = new Array(this.channels).fill(0);
 
+                // Learning system - Adaptive edge weights (Hebbian)
+                this.edgeWeights = new Map();
+                this.edges.forEach(([v1, v2]) => {
+                    const key = v1 < v2 ? `${v1}-${v2}` : `${v2}-${v1}`;
+                    this.edgeWeights.set(key, 1.0); // Initialize to 1.0
+                });
+
+                // Learning parameters
+                this.learningRate = 0.05;
+                this.decayRate = 0.001;
+                this.minWeight = 0.1;
+                this.maxWeight = 3.0;
+                this.consolidationInterval = 1000; // ms between consolidations
+                this.lastConsolidation = Date.now();
+
                 // Metrics
                 this.coherence = 0.7;
                 this.coherenceSmoothed = 0.7;
                 this.heartbeat = 0;
                 this.heartbeatPhase = 0;
                 this.messageCount = 0;
+
+                // Learning metrics
+                this.totalRecalls = 0;
+                this.successfulRecalls = 0;
+                this.avgRecallAccuracy = 0;
             }
 
             generateRhombicLatticePoints() {
@@ -1152,7 +1172,10 @@
                 const newField = [...this.torsionField];
                 newField[baseIndex] = intensity;
 
-                // 15-iteration propagation
+                // Track active nodes for Hebbian learning
+                const activeNodes = new Set([baseIndex]);
+
+                // 15-iteration propagation with adaptive edge weights
                 for (let iteration = 0; iteration < 15; iteration++) {
                     const tempField = [...newField];
 
@@ -1161,8 +1184,17 @@
                         const torsion1 = newField[v1];
                         const torsion2 = newField[v2];
 
-                        tempField[v1] += torsion2 * coupling * 0.08;
-                        tempField[v2] += torsion1 * coupling * 0.08;
+                        // Get learned edge weight
+                        const key = v1 < v2 ? `${v1}-${v2}` : `${v2}-${v1}`;
+                        const edgeWeight = this.edgeWeights.get(key) || 1.0;
+
+                        // Apply learned weight to propagation
+                        tempField[v1] += torsion2 * coupling * edgeWeight * 0.08;
+                        tempField[v2] += torsion1 * coupling * edgeWeight * 0.08;
+
+                        // Track co-activated nodes
+                        if (Math.abs(torsion1) > 0.1) activeNodes.add(v1);
+                        if (Math.abs(torsion2) > 0.1) activeNodes.add(v2);
                     }
 
                     // Apply decay and clamp to prevent runaway values
@@ -1172,12 +1204,25 @@
                 }
 
                 this.torsionField = newField;
+
+                // Apply Hebbian learning to strengthen co-activated connections
+                this.applyHebbianLearning(activeNodes);
+
                 return newField;
             }
 
             encode(message) {
                 const baseIndex = this.hashToPoint(message);
                 const phaseSignature = this.computePhaseSignature(message);
+
+                // Check if this is a repeated pattern (reinforcement learning)
+                const existing = this.memory[baseIndex].find(m => m.message === message);
+                if (existing) {
+                    existing.strength = (existing.strength || 1.0) + 0.2;
+                    existing.strength = Math.min(3.0, existing.strength);
+                    existing.accessCount = (existing.accessCount || 1) + 1;
+                    existing.lastAccess = Date.now();
+                }
 
                 // Propagate torsion
                 this.propagateTorsionField(baseIndex, 1.0);
@@ -1188,12 +1233,17 @@
                                            Math.cos(phaseSignature[i % this.dims]);
                 }
 
-                // Store in memory
-                this.memory[baseIndex].push({
-                    message,
-                    phaseSignature,
-                    timestamp: Date.now()
-                });
+                // Store in memory with learning metadata
+                if (!existing) {
+                    this.memory[baseIndex].push({
+                        message,
+                        phaseSignature,
+                        timestamp: Date.now(),
+                        lastAccess: Date.now(),
+                        strength: 1.0,
+                        accessCount: 1
+                    });
+                }
 
                 // Update channel states
                 for (let ch = 0; ch < this.channels; ch++) {
@@ -1253,6 +1303,9 @@
                     this.quantumStates[i] *= 0.97;
                 }
 
+                // Background consolidation
+                this.consolidate();
+
                 this.updateCoherence();
             }
 
@@ -1264,6 +1317,10 @@
                 const retention = this.torsionField.filter(t => Math.abs(t) > 0.01).length /
                                  this.torsionField.length;
 
+                // Calculate average edge weight (plasticity indicator)
+                const avgEdgeWeight = Array.from(this.edgeWeights.values()).reduce((a, b) => a + b, 0) /
+                                     this.edgeWeights.size;
+
                 return {
                     coherence: this.coherence,
                     torsion: avgTorsion,
@@ -1271,8 +1328,179 @@
                     retention,
                     heartbeat: this.heartbeat,
                     messageCount: this.messageCount,
-                    channelStates: this.channelStates
+                    channelStates: this.channelStates,
+                    avgEdgeWeight,
+                    recallAccuracy: this.totalRecalls > 0 ? this.successfulRecalls / this.totalRecalls : 0
                 };
+            }
+
+            // ============================================
+            // HEBBIAN LEARNING - "Fire together, wire together"
+            // ============================================
+            applyHebbianLearning(activeNodes) {
+                const activeList = Array.from(activeNodes);
+
+                // Strengthen connections between co-activated nodes
+                for (const [v1, v2] of this.edges) {
+                    const key = v1 < v2 ? `${v1}-${v2}` : `${v2}-${v1}`;
+                    const currentWeight = this.edgeWeights.get(key) || 1.0;
+
+                    // Both nodes active? Strengthen (LTP - Long-Term Potentiation)
+                    if (activeList.includes(v1) && activeList.includes(v2)) {
+                        const activation = Math.abs(this.torsionField[v1] * this.torsionField[v2]);
+                        const newWeight = currentWeight + this.learningRate * activation;
+                        this.edgeWeights.set(key, Math.min(this.maxWeight, newWeight));
+                    }
+                    // Neither active? Decay (LTD - Long-Term Depression)
+                    else if (!activeList.includes(v1) && !activeList.includes(v2)) {
+                        const newWeight = currentWeight - this.decayRate;
+                        this.edgeWeights.set(key, Math.max(this.minWeight, newWeight));
+                    }
+                }
+            }
+
+            // ============================================
+            // SIMILARITY-BASED RECALL
+            // ============================================
+            recall(query, threshold = 0.7) {
+                this.totalRecalls++;
+
+                const querySignature = this.computePhaseSignature(query);
+                let bestMatch = null;
+                let bestSimilarity = 0;
+
+                // Search all memory locations
+                for (let vertex = 0; vertex < this.memory.length; vertex++) {
+                    const memories = this.memory[vertex];
+
+                    for (const mem of memories) {
+                        // Compute cosine similarity
+                        const similarity = this.cosineSimilarity(querySignature, mem.phaseSignature);
+
+                        if (similarity > bestSimilarity && similarity >= threshold) {
+                            bestSimilarity = similarity;
+                            bestMatch = {
+                                message: mem.message,
+                                similarity,
+                                vertex,
+                                strength: mem.strength,
+                                accessCount: mem.accessCount
+                            };
+                        }
+                    }
+                }
+
+                // Strengthen recalled memory (reinforcement)
+                if (bestMatch) {
+                    this.successfulRecalls++;
+                    const mem = this.memory[bestMatch.vertex].find(m => m.message === bestMatch.message);
+                    if (mem) {
+                        mem.accessCount++;
+                        mem.lastAccess = Date.now();
+                        mem.strength = Math.min(this.maxWeight, (mem.strength || 1.0) + 0.1);
+                    }
+
+                    // Partially reactivate the pattern
+                    this.propagateTorsionField(bestMatch.vertex, 0.5);
+                }
+
+                return bestMatch;
+            }
+
+            // Cosine similarity between two vectors
+            cosineSimilarity(a, b) {
+                let dotProduct = 0;
+                let normA = 0;
+                let normB = 0;
+
+                for (let i = 0; i < Math.min(a.length, b.length); i++) {
+                    dotProduct += a[i] * b[i];
+                    normA += a[i] * a[i];
+                    normB += b[i] * b[i];
+                }
+
+                if (normA === 0 || normB === 0) return 0;
+                return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+            }
+
+            // ============================================
+            // MEMORY CONSOLIDATION - Background Learning
+            // ============================================
+            consolidate() {
+                const now = Date.now();
+                if (now - this.lastConsolidation < this.consolidationInterval) {
+                    return;
+                }
+
+                this.lastConsolidation = now;
+
+                // Strengthen frequently accessed memories
+                for (let vertex = 0; vertex < this.memory.length; vertex++) {
+                    const memories = this.memory[vertex];
+
+                    for (const mem of memories) {
+                        // Recent + frequent = important
+                        const recency = Math.exp(-(now - mem.lastAccess) / 60000); // Decay over 1 minute
+                        const frequency = Math.min(1, mem.accessCount / 10);
+                        const importance = (recency + frequency) / 2;
+
+                        // Adjust strength based on importance
+                        if (importance > 0.5) {
+                            mem.strength = Math.min(this.maxWeight, (mem.strength || 1.0) + 0.05);
+                        } else {
+                            mem.strength = Math.max(this.minWeight, (mem.strength || 1.0) - 0.02);
+                        }
+                    }
+
+                    // Prune very weak memories (catastrophic forgetting prevention)
+                    this.memory[vertex] = memories.filter(m => (m.strength || 1.0) > 0.2);
+                }
+
+                // Global weight normalization to prevent runaway growth
+                const avgWeight = Array.from(this.edgeWeights.values()).reduce((a, b) => a + b, 0) /
+                                 this.edgeWeights.size;
+
+                if (avgWeight > 1.5) {
+                    const normFactor = 1.2 / avgWeight;
+                    for (const [key, weight] of this.edgeWeights) {
+                        this.edgeWeights.set(key, weight * normFactor);
+                    }
+                }
+            }
+
+            // ============================================
+            // PATTERN COMPLETION - Fill in missing info
+            // ============================================
+            complete(partialQuery, maxSuggestions = 3) {
+                const partialSignature = this.computePhaseSignature(partialQuery);
+                const candidates = [];
+
+                // Find all memories with partial match
+                for (let vertex = 0; vertex < this.memory.length; vertex++) {
+                    const memories = this.memory[vertex];
+
+                    for (const mem of memories) {
+                        // Check if memory starts with partial query
+                        if (mem.message.toLowerCase().startsWith(partialQuery.toLowerCase())) {
+                            const similarity = this.cosineSimilarity(partialSignature, mem.phaseSignature);
+                            candidates.push({
+                                message: mem.message,
+                                similarity,
+                                strength: mem.strength || 1.0,
+                                accessCount: mem.accessCount || 1
+                            });
+                        }
+                    }
+                }
+
+                // Sort by strength * similarity * frequency
+                candidates.sort((a, b) => {
+                    const scoreA = a.similarity * a.strength * Math.log(a.accessCount + 1);
+                    const scoreB = b.similarity * b.strength * Math.log(b.accessCount + 1);
+                    return scoreB - scoreA;
+                });
+
+                return candidates.slice(0, maxSuggestions);
             }
         }
 
@@ -1990,11 +2218,21 @@
             }
 
             simulateResponse(input) {
+                // Try to recall similar pattern
+                const recall = this.tea.recall(input, 0.6);
+
+                if (recall) {
+                    // Found similar memory - learning is working!
+                    return `🧠 Memory recall activated! Found similar pattern "${recall.message}" with ${(recall.similarity * 100).toFixed(1)}% similarity (strength: ${recall.strength.toFixed(2)}, accessed ${recall.accessCount}x). The system is learning from repeated patterns. Avg edge weight: ${this.tea.getMetrics().avgEdgeWeight.toFixed(2)}.`;
+                }
+
+                // No recall - provide encoding metrics
+                const metrics = this.tea.getMetrics();
                 const responses = [
-                    `Processing through rhombic torsion field (${(this.tea.coherence * 100).toFixed(1)}% coherence). Your input has been encoded across ${this.tea.channels} parallel channels with topological protection.`,
-                    `Torsion field resonance detected. Message stored at vertex with ${(this.tea.getMetrics().retention * 100).toFixed(0)}% energy retention. The geometric memory structure is adapting to your input.`,
-                    `Quantum coupling strength: ${this.tea.getMetrics().coupling.toFixed(3)}. Your message propagated through the spiralhedron lattice successfully. ${this.tea.messageCount} total patterns stored.`,
-                    `Encoding complete. Channel balance: ${((1 - (Math.max(...this.tea.channelStates) - Math.min(...this.tea.channelStates))) * 100).toFixed(1)}%. All ${this.tea.channels} processing channels operational.`
+                    `Processing through rhombic torsion field (${(metrics.coherence * 100).toFixed(1)}% coherence). Your input has been encoded across ${this.tea.channels} parallel channels with topological protection. Hebbian learning active - avg edge weight: ${metrics.avgEdgeWeight.toFixed(2)}.`,
+                    `Torsion field resonance detected. Message stored at vertex with ${(metrics.retention * 100).toFixed(0)}% energy retention. Edge weights adapting via long-term potentiation. Recall accuracy: ${(metrics.recallAccuracy * 100).toFixed(1)}%.`,
+                    `Quantum coupling strength: ${metrics.coupling.toFixed(3)}. Your message propagated through the spiralhedron lattice successfully. ${metrics.messageCount} total patterns stored. System plasticity: ${metrics.avgEdgeWeight.toFixed(2)}x baseline.`,
+                    `Encoding complete. Channel balance: ${((1 - (Math.max(...this.tea.channelStates) - Math.min(...this.tea.channelStates))) * 100).toFixed(1)}%. All ${this.tea.channels} processing channels operational. Memory consolidation active.`
                 ];
                 return responses[Math.floor(Math.random() * responses.length)];
             }
