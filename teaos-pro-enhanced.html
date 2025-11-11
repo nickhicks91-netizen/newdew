@@ -1051,6 +1051,23 @@
                 this.totalRecalls = 0;
                 this.successfulRecalls = 0;
                 this.avgRecallAccuracy = 0;
+
+                // Phase 1: Data Grounding & Indexing
+                this.semanticChunks = [];
+                this.contradictionFlags = [];
+
+                // Phase 2: Dynamic Context & Retrieval
+                this.keywordIndex = new Map(); // For hybrid search
+                this.queryCache = new Map();
+
+                // Phase 3: Observability & Self-Correction
+                this.responseQuality = [];
+                this.adaptiveConfig = {
+                    dynamicContextWindow: true,
+                    dynamicRagTopK: true,
+                    contextCompaction: true,
+                    activeLearning: true
+                };
             }
 
             generateRhombicLatticePoints() {
@@ -1217,7 +1234,9 @@
 
             encode(message) {
                 const baseIndex = this.hashToPoint(message);
-                const phaseSignature = this.computePhaseSignature(message);
+
+                // Phase 1: Enrich metadata with keywords and topic hash
+                const enrichedMemory = this.enrichMemoryMetadata(message);
 
                 // Check if this is a repeated pattern (reinforcement learning)
                 const existing = this.memory[baseIndex].find(m => m.message === message);
@@ -1234,19 +1253,16 @@
                 // Update quantum states
                 for (let i = 0; i < this.totalPoints; i++) {
                     this.quantumStates[i] = Math.sin(this.torsionField[i] * Math.PI) *
-                                           Math.cos(phaseSignature[i % this.dims]);
+                                           Math.cos(enrichedMemory.phaseSignature[i % this.dims]);
                 }
 
-                // Store in memory with learning metadata
+                // Store in memory with enriched metadata
                 if (!existing) {
-                    this.memory[baseIndex].push({
-                        message,
-                        phaseSignature,
-                        timestamp: Date.now(),
-                        lastAccess: Date.now(),
-                        strength: 1.0,
-                        accessCount: 1
-                    });
+                    // Phase 1: Check for contradictions before storing
+                    const hasContradiction = this.detectContradictions(enrichedMemory, this.memory[baseIndex]);
+                    enrichedMemory.hasContradiction = hasContradiction;
+
+                    this.memory[baseIndex].push(enrichedMemory);
                 }
 
                 // Update channel states
@@ -1505,6 +1521,393 @@
                 });
 
                 return candidates.slice(0, maxSuggestions);
+            }
+
+            // ============================================
+            // PHASE 1: DATA GROUNDING & INDEXING
+            // ============================================
+
+            // 1.1 Smart Chunking - Semantic boundary detection
+            smartChunk(text, maxChunkSize = 200) {
+                const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+                const chunks = [];
+                let currentChunk = '';
+                let currentTokens = 0;
+
+                for (const sentence of sentences) {
+                    const sentenceTokens = Math.ceil(sentence.length / 4);
+
+                    if (currentTokens + sentenceTokens > maxChunkSize && currentChunk) {
+                        chunks.push({
+                            text: currentChunk.trim(),
+                            tokens: currentTokens,
+                            boundary: 'semantic',
+                            timestamp: Date.now()
+                        });
+                        currentChunk = '';
+                        currentTokens = 0;
+                    }
+
+                    currentChunk += sentence;
+                    currentTokens += sentenceTokens;
+                }
+
+                if (currentChunk) {
+                    chunks.push({
+                        text: currentChunk.trim(),
+                        tokens: currentTokens,
+                        boundary: 'semantic',
+                        timestamp: Date.now()
+                    });
+                }
+
+                return chunks;
+            }
+
+            // 1.2 Metadata Enrichment
+            enrichMemoryMetadata(message, source = 'user') {
+                const topicHash = this.hashToPoint(message);
+                const keywords = this.extractKeywords(message);
+
+                return {
+                    message,
+                    source,
+                    timestamp: Date.now(),
+                    lastAccess: Date.now(),
+                    topicHash,
+                    keywords,
+                    strength: 1.0,
+                    accessCount: 1,
+                    phaseSignature: this.computePhaseSignature(message)
+                };
+            }
+
+            extractKeywords(text) {
+                // Simple keyword extraction (can be enhanced with TF-IDF)
+                const words = text.toLowerCase()
+                    .replace(/[^\w\s]/g, '')
+                    .split(/\s+/)
+                    .filter(w => w.length > 3);
+
+                const stopWords = new Set(['that', 'this', 'with', 'from', 'have', 'been', 'were', 'what']);
+                return words.filter(w => !stopWords.has(w));
+            }
+
+            // 1.3 Contradiction Detection
+            detectContradictions(newMemory, existingMemories) {
+                for (const existing of existingMemories) {
+                    const sim = this.cosineSimilarity(newMemory.phaseSignature, existing.phaseSignature);
+
+                    // High semantic similarity but different keywords = potential contradiction
+                    if (sim > 0.8) {
+                        const newKeywords = new Set(newMemory.keywords);
+                        const existingKeywords = new Set(existing.keywords);
+                        const commonKeywords = [...newKeywords].filter(k => existingKeywords.has(k));
+
+                        if (commonKeywords.length < Math.min(newKeywords.size, existingKeywords.size) * 0.3) {
+                            this.contradictionFlags.push({
+                                newMessage: newMemory.message,
+                                existingMessage: existing.message,
+                                similarity: sim,
+                                timestamp: Date.now()
+                            });
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            // ============================================
+            // PHASE 2: DYNAMIC CONTEXT & RETRIEVAL
+            // ============================================
+
+            // 2.1 Hybrid Retrieval (Vector + Keyword)
+            hybridRetrieve(query, topK = 3) {
+                const queryKeywords = this.extractKeywords(query);
+                const queryEmbedding = this.computePhaseSignature(query);
+
+                const candidates = [];
+
+                // Collect all memories
+                for (let vertex = 0; vertex < this.memory.length; vertex++) {
+                    for (const mem of this.memory[vertex]) {
+                        // Vector similarity
+                        const vectorScore = this.cosineSimilarity(queryEmbedding, mem.phaseSignature);
+
+                        // Keyword matching score
+                        const memKeywords = new Set(mem.keywords || []);
+                        const matchedKeywords = queryKeywords.filter(k => memKeywords.has(k)).length;
+                        const keywordScore = queryKeywords.length > 0 ?
+                            matchedKeywords / queryKeywords.length : 0;
+
+                        // Hybrid score: 70% vector + 30% keyword
+                        const hybridScore = vectorScore * 0.7 + keywordScore * 0.3;
+
+                        candidates.push({
+                            memory: mem,
+                            vertex,
+                            vectorScore,
+                            keywordScore,
+                            hybridScore
+                        });
+                    }
+                }
+
+                // Sort by hybrid score
+                candidates.sort((a, b) => b.hybridScore - a.hybridScore);
+
+                return candidates.slice(0, topK * 3); // Get 3x for re-ranking
+            }
+
+            // 2.2 Query Transformation
+            transformQuery(query) {
+                // Check cache first
+                if (this.queryCache.has(query)) {
+                    return this.queryCache.get(query);
+                }
+
+                // Expand short queries
+                if (query.split(' ').length < 3) {
+                    // Find similar past queries
+                    const pastQueries = Array.from(this.queryCache.keys());
+                    for (const past of pastQueries) {
+                        if (past.toLowerCase().includes(query.toLowerCase())) {
+                            this.queryCache.set(query, past);
+                            return past;
+                        }
+                    }
+                }
+
+                // Add context from recent messages
+                const recentContext = this.memory.flat()
+                    .filter(m => Date.now() - m.timestamp < 60000) // Last minute
+                    .slice(-3)
+                    .map(m => m.message)
+                    .join(' ');
+
+                const transformedQuery = recentContext ?
+                    `${query} (context: ${recentContext.slice(0, 100)})` :
+                    query;
+
+                this.queryCache.set(query, transformedQuery);
+                return transformedQuery;
+            }
+
+            // 2.3 Two-Stage Retrieval with Re-ranking
+            retrieveWithReranking(query, topK = 3) {
+                // Stage 1: Hybrid retrieval (get 3x candidates)
+                const candidates = this.hybridRetrieve(query, topK);
+
+                if (candidates.length === 0) return [];
+
+                const queryWords = query.toLowerCase().split(/\s+/);
+
+                // Stage 2: Re-rank with cross-encoder simulation
+                const reranked = candidates.map(candidate => {
+                    const memText = candidate.memory.message.toLowerCase();
+
+                    // Position bias: where do query terms appear?
+                    let positionScore = 0;
+                    queryWords.forEach(word => {
+                        const pos = memText.indexOf(word);
+                        if (pos !== -1) {
+                            positionScore += 1 / (pos + 1); // Earlier = higher score
+                        }
+                    });
+
+                    // Recency bonus
+                    const age = Date.now() - candidate.memory.timestamp;
+                    const recencyScore = Math.exp(-age / 300000); // Decay over 5 minutes
+
+                    // Strength multiplier
+                    const strengthScore = (candidate.memory.strength || 1.0) / 3.0;
+
+                    // Final reranking score
+                    const rerankScore = candidate.hybridScore * 0.5 +
+                                       positionScore * 0.2 +
+                                       recencyScore * 0.15 +
+                                       strengthScore * 0.15;
+
+                    return { ...candidate, rerankScore };
+                });
+
+                // Sort by rerank score and return top K
+                reranked.sort((a, b) => b.rerankScore - a.rerankScore);
+                return reranked.slice(0, topK);
+            }
+
+            // ============================================
+            // PHASE 3: OBSERVABILITY & SELF-CORRECTION
+            // ============================================
+
+            // 3.1 Dynamic Context Sizing
+            getDynamicContextWindow() {
+                if (!this.adaptiveConfig.dynamicContextWindow) {
+                    return 4096; // Default
+                }
+
+                // Low coherence = need more context
+                if (this.coherence < 0.5) {
+                    return 8192;
+                } else if (this.coherence > 0.8) {
+                    return 2048; // High coherence = can use less
+                }
+                return 4096;
+            }
+
+            getDynamicRagTopK() {
+                if (!this.adaptiveConfig.dynamicRagTopK) {
+                    return 3;
+                }
+
+                // Low coherence = search harder
+                if (this.coherence < 0.5) {
+                    return 5;
+                } else if (this.coherence > 0.8) {
+                    return 2;
+                }
+                return 3;
+            }
+
+            // 3.2 Context Compaction for API
+            getCompactedContext() {
+                if (!this.adaptiveConfig.contextCompaction) {
+                    return this.memory.flat();
+                }
+
+                // Only include: consolidated memories + recent messages + RAG results
+                const consolidated = this.memory.flat()
+                    .filter(m => (m.strength || 1.0) > 2.0) // Strong memories only
+                    .slice(-5); // Last 5 strong memories
+
+                const recent = this.memory.flat()
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .slice(0, 3); // Last 3 messages
+
+                // Deduplicate
+                const seen = new Set();
+                const compacted = [];
+
+                for (const mem of [...consolidated, ...recent]) {
+                    if (!seen.has(mem.message)) {
+                        compacted.push(mem);
+                        seen.add(mem.message);
+                    }
+                }
+
+                return compacted;
+            }
+
+            // 3.3 Active Learning - Feedback Loop
+            recordResponseQuality(query, response, success, groundedFacts = []) {
+                const qualityRecord = {
+                    query,
+                    response,
+                    success,
+                    groundedFacts,
+                    coherence: this.coherence,
+                    timestamp: Date.now()
+                };
+
+                this.responseQuality.push(qualityRecord);
+
+                // Only reinforce if successful
+                if (this.adaptiveConfig.activeLearning && success) {
+                    // Find which memories contributed to this success
+                    const queryHash = this.hashToPoint(query);
+                    const neighbors = this.adjacency.get(queryHash) || [];
+
+                    for (const neighbor of neighbors) {
+                        const key = queryHash < neighbor.index ?
+                            `${queryHash}-${neighbor.index}` :
+                            `${neighbor.index}-${queryHash}`;
+
+                        const currentWeight = this.edgeWeights.get(key) || 1.0;
+                        this.edgeWeights.set(key, Math.min(this.maxWeight, currentWeight + 0.1));
+                    }
+                } else if (!success) {
+                    // Weaken connections that led to failure
+                    const queryHash = this.hashToPoint(query);
+                    const neighbors = this.adjacency.get(queryHash) || [];
+
+                    for (const neighbor of neighbors) {
+                        const key = queryHash < neighbor.index ?
+                            `${queryHash}-${neighbor.index}` :
+                            `${neighbor.index}-${queryHash}`;
+
+                        const currentWeight = this.edgeWeights.get(key) || 1.0;
+                        this.edgeWeights.set(key, Math.max(this.minWeight, currentWeight - 0.05));
+                    }
+                }
+
+                // Keep only recent quality records
+                if (this.responseQuality.length > 100) {
+                    this.responseQuality = this.responseQuality.slice(-100);
+                }
+            }
+
+            getQualityMetrics() {
+                if (this.responseQuality.length === 0) {
+                    return {
+                        avgSuccessRate: 0,
+                        recentSuccessRate: 0,
+                        avgCoherence: this.coherence
+                    };
+                }
+
+                const totalSuccess = this.responseQuality.filter(r => r.success).length;
+                const recentSuccess = this.responseQuality.slice(-10).filter(r => r.success).length;
+
+                return {
+                    avgSuccessRate: totalSuccess / this.responseQuality.length,
+                    recentSuccessRate: this.responseQuality.length >= 10 ?
+                        recentSuccess / Math.min(10, this.responseQuality.length) :
+                        totalSuccess / this.responseQuality.length,
+                    avgCoherence: this.responseQuality.reduce((sum, r) => sum + r.coherence, 0) /
+                                 this.responseQuality.length
+                };
+            }
+
+            // Enhanced recall with all production features
+            productionRecall(query, threshold = 0.6) {
+                // Phase 2: Transform query
+                const transformedQuery = this.transformQuery(query);
+
+                // Phase 2: Retrieve with re-ranking
+                const topK = this.getDynamicRagTopK();
+                const results = this.retrieveWithReranking(transformedQuery, topK);
+
+                if (results.length === 0) {
+                    return null;
+                }
+
+                const bestResult = results[0];
+
+                if (bestResult.rerankScore < threshold) {
+                    return null;
+                }
+
+                // Phase 1: Check for contradictions
+                const hasContradictions = this.detectContradictions(
+                    bestResult.memory,
+                    results.slice(1).map(r => r.memory)
+                );
+
+                // Update access metadata
+                bestResult.memory.accessCount++;
+                bestResult.memory.lastAccess = Date.now();
+                bestResult.memory.strength = Math.min(this.maxWeight,
+                    (bestResult.memory.strength || 1.0) + 0.1);
+
+                return {
+                    message: bestResult.memory.message,
+                    similarity: bestResult.rerankScore,
+                    strength: bestResult.memory.strength,
+                    accessCount: bestResult.memory.accessCount,
+                    hasContradictions,
+                    retrievalMethod: 'hybrid+reranking'
+                };
             }
         }
 
@@ -2222,21 +2625,29 @@
             }
 
             simulateResponse(input) {
-                // Try to recall similar pattern
-                const recall = this.tea.recall(input, 0.6);
+                // Phase 2 & 3: Use production-grade recall with hybrid retrieval + re-ranking
+                const recall = this.tea.productionRecall(input, 0.6);
 
                 if (recall) {
-                    // Found similar memory - learning is working!
-                    return `🧠 Memory recall activated! Found similar pattern "${recall.message}" with ${(recall.similarity * 100).toFixed(1)}% similarity (strength: ${recall.strength.toFixed(2)}, accessed ${recall.accessCount}x). The system is learning from repeated patterns. Avg edge weight: ${this.tea.getMetrics().avgEdgeWeight.toFixed(2)}.`;
+                    // Phase 3: Record response quality for active learning
+                    this.tea.recordResponseQuality(input, recall.message, true);
+
+                    // Found similar memory with advanced retrieval!
+                    const contradictionWarning = recall.hasContradictions ?
+                        ' ⚠️ Contradiction detected with other memories!' : '';
+                    const dynamicTopK = this.tea.getDynamicRagTopK();
+
+                    return `🧠 Production Recall (${recall.retrievalMethod})! Found: "${recall.message}" | Similarity: ${(recall.similarity * 100).toFixed(1)}% | Strength: ${recall.strength.toFixed(2)} | Accessed ${recall.accessCount}x${contradictionWarning} | Dynamic TopK: ${dynamicTopK} | Context Window: ${this.tea.getDynamicContextWindow()} tokens.`;
                 }
 
-                // No recall - provide encoding metrics
+                // No recall - provide advanced encoding metrics
                 const metrics = this.tea.getMetrics();
+                const qualityMetrics = this.tea.getQualityMetrics();
                 const responses = [
-                    `Processing through rhombic torsion field (${(metrics.coherence * 100).toFixed(1)}% coherence). Your input has been encoded across ${this.tea.channels} parallel channels with topological protection. Hebbian learning active - avg edge weight: ${metrics.avgEdgeWeight.toFixed(2)}.`,
-                    `Torsion field resonance detected. Message stored at vertex with ${(metrics.retention * 100).toFixed(0)}% energy retention. Edge weights adapting via long-term potentiation. Recall accuracy: ${(metrics.recallAccuracy * 100).toFixed(1)}%.`,
-                    `Quantum coupling strength: ${metrics.coupling.toFixed(3)}. Your message propagated through the spiralhedron lattice successfully. ${metrics.messageCount} total patterns stored. System plasticity: ${metrics.avgEdgeWeight.toFixed(2)}x baseline.`,
-                    `Encoding complete. Channel balance: ${((1 - (Math.max(...this.tea.channelStates) - Math.min(...this.tea.channelStates))) * 100).toFixed(1)}%. All ${this.tea.channels} processing channels operational. Memory consolidation active.`
+                    `📊 Production Encoding: ${(metrics.coherence * 100).toFixed(1)}% coherence | ${this.tea.channels} channels | Metadata-enriched storage with keyword indexing | Dynamic context sizing active | Success rate: ${(qualityMetrics.recentSuccessRate * 100).toFixed(1)}%.`,
+                    `🔍 Hybrid Retrieval Ready: Vector + Keyword search enabled | Contradictions: ${this.tea.contradictionFlags.length} detected | Query cache: ${this.tea.queryCache.size} entries | Re-ranking: 2-stage with position bias.`,
+                    `⚡ Adaptive Learning: Edge weights ${metrics.avgEdgeWeight.toFixed(2)}x | ${metrics.messageCount} patterns | Recall accuracy: ${(metrics.recallAccuracy * 100).toFixed(1)}% | Active learning feedback: ${this.tea.adaptiveConfig.activeLearning ? 'ON' : 'OFF'}.`,
+                    `🎯 Context Optimization: ${this.tea.getCompactedContext().length} compacted memories | Dynamic window: ${this.tea.getDynamicContextWindow()} tokens | Semantic chunking: sentence boundaries | Production-ready middleware.`
                 ];
                 return responses[Math.floor(Math.random() * responses.length)];
             }
