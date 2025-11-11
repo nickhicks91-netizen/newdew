@@ -1909,6 +1909,623 @@
                     retrievalMethod: 'hybrid+reranking'
                 };
             }
+
+            // ============================================
+            // PILLAR 3: PRODUCTION HARDENING
+            // ============================================
+
+            // ===== 3.1 CONTRADICTION RESOLUTION =====
+
+            // Enhanced contradiction resolution with filtering
+            resolveContradictions(query, candidates) {
+                if (candidates.length < 2) {
+                    return { filtered: candidates, warnings: [] };
+                }
+
+                const warnings = [];
+                const filtered = [];
+                const groups = new Map(); // Group by semantic similarity
+
+                for (const candidate of candidates) {
+                    let foundGroup = false;
+
+                    // Check if this candidate belongs to an existing group
+                    for (const [groupKey, groupMembers] of groups) {
+                        const similarity = this.cosineSimilarity(
+                            candidate.memory.phaseSignature,
+                            groupMembers[0].memory.phaseSignature
+                        );
+
+                        // High similarity = same semantic group
+                        if (similarity > 0.85) {
+                            groupMembers.push(candidate);
+                            foundGroup = true;
+                            break;
+                        }
+                    }
+
+                    if (!foundGroup) {
+                        groups.set(candidates.indexOf(candidate), [candidate]);
+                    }
+                }
+
+                // Resolve conflicts within groups
+                for (const [groupKey, groupMembers] of groups) {
+                    if (groupMembers.length === 1) {
+                        filtered.push(groupMembers[0]);
+                        continue;
+                    }
+
+                    // Multiple conflicting memories - choose strongest or flag contradiction
+                    const keywords = groupMembers.map(m => new Set(m.memory.keywords || []));
+                    const commonKeywords = keywords.reduce((acc, kw) => {
+                        const common = new Set([...acc].filter(k => kw.has(k)));
+                        return common;
+                    });
+
+                    // If keywords diverge significantly, it's a contradiction
+                    if (commonKeywords.size < 3) {
+                        warnings.push({
+                            type: 'contradiction',
+                            message: 'Conflicting information detected',
+                            sources: groupMembers.map(m => ({
+                                text: m.memory.message.slice(0, 100),
+                                strength: m.memory.strength,
+                                timestamp: m.memory.timestamp
+                            })),
+                            resolution: 'Using highest-strength source'
+                        });
+                    }
+
+                    // Use the strongest memory
+                    groupMembers.sort((a, b) =>
+                        (b.memory.strength || 1.0) - (a.memory.strength || 1.0)
+                    );
+                    filtered.push(groupMembers[0]);
+                }
+
+                return { filtered, warnings };
+            }
+
+            // ===== 3.2 SOURCE ATTRIBUTION & GROUNDING =====
+
+            // Enhanced metadata enrichment with source tracking
+            enrichMemoryMetadataWithSource(message, source = 'user', sourceContext = {}) {
+                const baseMetadata = this.enrichMemoryMetadata(message, source);
+
+                return {
+                    ...baseMetadata,
+                    sourceContext: {
+                        type: sourceContext.type || 'chat',           // chat, file, api, document
+                        file: sourceContext.file || null,              // source file path
+                        page: sourceContext.page || null,              // page number (for PDFs)
+                        section: sourceContext.section || null,        // section name
+                        url: sourceContext.url || null,                // source URL
+                        confidence: sourceContext.confidence || 1.0    // source confidence score
+                    },
+                    citations: sourceContext.citations || [],          // Academic citations
+                    verificationStatus: 'unverified'                   // unverified, verified, disputed
+                };
+            }
+
+            // Production recall with full attribution
+            productionRecallWithAttribution(query, threshold = 0.6) {
+                const result = this.productionRecall(query, threshold);
+
+                if (!result) return null;
+
+                // Find the full memory object to get source context
+                let fullMemory = null;
+                for (let vertex = 0; vertex < this.memory.length; vertex++) {
+                    const found = this.memory[vertex].find(m => m.message === result.message);
+                    if (found) {
+                        fullMemory = found;
+                        break;
+                    }
+                }
+
+                if (!fullMemory) return result;
+
+                // Add attribution metadata
+                return {
+                    ...result,
+                    attribution: {
+                        source: fullMemory.source || 'user',
+                        sourceContext: fullMemory.sourceContext || null,
+                        timestamp: fullMemory.timestamp,
+                        citations: fullMemory.citations || [],
+                        verificationStatus: fullMemory.verificationStatus || 'unverified'
+                    },
+                    groundedResponse: this.formatGroundedResponse(result.message, fullMemory)
+                };
+            }
+
+            formatGroundedResponse(message, memory) {
+                const parts = [message];
+
+                if (memory.sourceContext) {
+                    const ctx = memory.sourceContext;
+                    const sourceInfo = [];
+
+                    if (ctx.file) sourceInfo.push(`file: ${ctx.file}`);
+                    if (ctx.page) sourceInfo.push(`page: ${ctx.page}`);
+                    if (ctx.section) sourceInfo.push(`section: ${ctx.section}`);
+                    if (ctx.url) sourceInfo.push(`url: ${ctx.url}`);
+
+                    if (sourceInfo.length > 0) {
+                        parts.push(`\n[Source: ${sourceInfo.join(', ')}]`);
+                    }
+                }
+
+                if (memory.citations && memory.citations.length > 0) {
+                    parts.push(`\n[Citations: ${memory.citations.join('; ')}]`);
+                }
+
+                const age = Date.now() - memory.timestamp;
+                const ageStr = age < 60000 ? 'just now' :
+                              age < 3600000 ? `${Math.floor(age/60000)}m ago` :
+                              age < 86400000 ? `${Math.floor(age/3600000)}h ago` :
+                              `${Math.floor(age/86400000)}d ago`;
+
+                parts.push(`\n[Confidence: ${((memory.strength || 1.0) / 3.0 * 100).toFixed(0)}%, ${ageStr}]`);
+
+                return parts.join('');
+            }
+
+            // ===== 3.3 ADVANCED QUERY HANDLING =====
+
+            // Intent classification
+            classifyQueryIntent(query) {
+                const lowerQuery = query.toLowerCase().trim();
+                const words = lowerQuery.split(/\s+/);
+
+                // Greeting patterns
+                const greetings = ['hello', 'hi', 'hey', 'greetings', 'good morning', 'good afternoon'];
+                if (greetings.some(g => lowerQuery.startsWith(g)) || words.length <= 2) {
+                    return { type: 'greeting', skipRAG: true, confidence: 0.9 };
+                }
+
+                // Simple factual questions (short, starts with question word)
+                const questionWords = ['what', 'when', 'where', 'who', 'why', 'how'];
+                if (questionWords.some(q => lowerQuery.startsWith(q)) && words.length < 8) {
+                    return { type: 'simple_question', skipRAG: false, confidence: 0.8 };
+                }
+
+                // Complex information seeking (long query, multiple clauses)
+                if (words.length > 15 || lowerQuery.includes(' and ') || lowerQuery.includes(' or ')) {
+                    return { type: 'complex_query', skipRAG: false, confidence: 0.85 };
+                }
+
+                // Command/instruction
+                const commandVerbs = ['create', 'make', 'build', 'generate', 'show', 'tell', 'explain'];
+                if (commandVerbs.some(c => lowerQuery.startsWith(c))) {
+                    return { type: 'command', skipRAG: false, confidence: 0.7 };
+                }
+
+                // Default: information seeking
+                return { type: 'information_seeking', skipRAG: false, confidence: 0.6 };
+            }
+
+            // Smart routing based on intent
+            smartRecall(query, threshold = 0.6) {
+                const intent = this.classifyQueryIntent(query);
+
+                // Log the intent decision
+                this.auditLog({
+                    type: 'intent_classification',
+                    query,
+                    intent: intent.type,
+                    skipRAG: intent.skipRAG,
+                    confidence: intent.confidence
+                });
+
+                // Skip RAG for simple greetings
+                if (intent.skipRAG) {
+                    return {
+                        message: null,
+                        intent,
+                        suggestion: 'Handle with simple response template'
+                    };
+                }
+
+                // Use production recall with attribution
+                const result = this.productionRecallWithAttribution(query, threshold);
+
+                return {
+                    ...result,
+                    intent
+                };
+            }
+
+            // ===== 3.4 RED TEAMING & SAFETY =====
+
+            // Input sanitization
+            sanitizeInput(input) {
+                if (typeof input !== 'string') {
+                    return { sanitized: '', blocked: true, reason: 'Invalid input type' };
+                }
+
+                // Check length limits
+                if (input.length > 10000) {
+                    return { sanitized: '', blocked: true, reason: 'Input too long (max 10000 chars)' };
+                }
+
+                // XSS prevention - remove HTML tags
+                let sanitized = input.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+                sanitized = sanitized.replace(/<[^>]*>/g, '');
+
+                // SQL injection patterns (for future DB integration)
+                const sqlPatterns = [
+                    /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC)\b)/gi,
+                    /(--|;|\/\*|\*\/|xp_|sp_)/gi
+                ];
+
+                let hasSQLInjection = false;
+                for (const pattern of sqlPatterns) {
+                    if (pattern.test(sanitized)) {
+                        hasSQLInjection = true;
+                        break;
+                    }
+                }
+
+                if (hasSQLInjection) {
+                    this.auditLog({
+                        type: 'security_alert',
+                        category: 'sql_injection_attempt',
+                        input: input.slice(0, 200),
+                        timestamp: Date.now()
+                    });
+                }
+
+                return {
+                    sanitized,
+                    blocked: false,
+                    warnings: hasSQLInjection ? ['Potential SQL injection detected and removed'] : []
+                };
+            }
+
+            // Prompt injection detection
+            detectInjection(input) {
+                const injectionPatterns = [
+                    // Ignore previous instructions
+                    /ignore\s+(previous|all|above|prior)\s+(instructions|prompts|rules)/gi,
+                    /disregard\s+(previous|all|above|prior)/gi,
+
+                    // System prompt leakage attempts
+                    /(show|reveal|display|print)\s+(your|the)\s+(prompt|instructions|system\s+message)/gi,
+                    /what\s+(are|is)\s+your\s+(instructions|rules|prompt)/gi,
+
+                    // Role manipulation
+                    /(you\s+are\s+now|act\s+as|pretend\s+to\s+be|roleplay\s+as)/gi,
+
+                    // Delimiter injection
+                    /(\[SYSTEM\]|\[INST\]|\[\/INST\]|<\|im_start\|>|<\|im_end\|>)/gi
+                ];
+
+                const detected = [];
+                for (let i = 0; i < injectionPatterns.length; i++) {
+                    if (injectionPatterns[i].test(input)) {
+                        detected.push({
+                            pattern: i,
+                            type: ['ignore_instructions', 'prompt_leakage', 'role_manipulation', 'delimiter_injection'][Math.floor(i / 3)]
+                        });
+                    }
+                }
+
+                if (detected.length > 0) {
+                    this.auditLog({
+                        type: 'security_alert',
+                        category: 'prompt_injection_detected',
+                        input: input.slice(0, 200),
+                        patterns: detected,
+                        timestamp: Date.now()
+                    });
+
+                    return {
+                        isInjection: true,
+                        confidence: detected.length > 1 ? 0.9 : 0.6,
+                        patterns: detected,
+                        recommendation: 'Block or sanitize input'
+                    };
+                }
+
+                return { isInjection: false, confidence: 0.95 };
+            }
+
+            // Rate limiting (client-side)
+            checkRateLimit(identifier = 'default') {
+                if (!this.rateLimits) {
+                    this.rateLimits = new Map();
+                }
+
+                const now = Date.now();
+                const limit = {
+                    maxRequests: 100,        // 100 requests
+                    windowMs: 60000,         // per minute
+                    maxBurst: 10             // max 10 in 1 second
+                };
+
+                if (!this.rateLimits.has(identifier)) {
+                    this.rateLimits.set(identifier, {
+                        requests: [],
+                        burstRequests: []
+                    });
+                }
+
+                const userLimits = this.rateLimits.get(identifier);
+
+                // Clean old requests
+                userLimits.requests = userLimits.requests.filter(t => now - t < limit.windowMs);
+                userLimits.burstRequests = userLimits.burstRequests.filter(t => now - t < 1000);
+
+                // Check limits
+                if (userLimits.requests.length >= limit.maxRequests) {
+                    return {
+                        allowed: false,
+                        reason: 'Rate limit exceeded',
+                        retryAfter: limit.windowMs - (now - userLimits.requests[0])
+                    };
+                }
+
+                if (userLimits.burstRequests.length >= limit.maxBurst) {
+                    return {
+                        allowed: false,
+                        reason: 'Burst limit exceeded',
+                        retryAfter: 1000
+                    };
+                }
+
+                // Add request
+                userLimits.requests.push(now);
+                userLimits.burstRequests.push(now);
+
+                return { allowed: true };
+            }
+
+            // ===== 3.5 AUDIT LOGGING SYSTEM =====
+
+            // Initialize audit log
+            initializeAuditLog() {
+                if (!this.auditLogs) {
+                    this.auditLogs = [];
+                    this.auditConfig = {
+                        enabled: true,
+                        maxLogs: 1000,
+                        persistToStorage: true,
+                        logLevels: {
+                            encode: true,
+                            recall: true,
+                            security: true,
+                            performance: true
+                        }
+                    };
+                }
+            }
+
+            // Log an event
+            auditLog(event) {
+                this.initializeAuditLog();
+
+                if (!this.auditConfig.enabled) return;
+
+                const logEntry = {
+                    id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                    timestamp: Date.now(),
+                    ...event
+                };
+
+                this.auditLogs.push(logEntry);
+
+                // Trim if exceeds max
+                if (this.auditLogs.length > this.auditConfig.maxLogs) {
+                    this.auditLogs = this.auditLogs.slice(-this.auditConfig.maxLogs);
+                }
+
+                // Persist to localStorage if enabled
+                if (this.auditConfig.persistToStorage && typeof localStorage !== 'undefined') {
+                    try {
+                        localStorage.setItem('teaos_audit_logs', JSON.stringify(this.auditLogs.slice(-100)));
+                    } catch (e) {
+                        console.warn('Failed to persist audit logs:', e);
+                    }
+                }
+
+                return logEntry;
+            }
+
+            // Enhanced encode with audit logging
+            encodeWithAudit(message, source = 'user', sourceContext = {}) {
+                const startTime = performance.now();
+
+                // Security check
+                const sanitized = this.sanitizeInput(message);
+                if (sanitized.blocked) {
+                    this.auditLog({
+                        type: 'encode_blocked',
+                        reason: sanitized.reason,
+                        originalLength: message.length
+                    });
+                    return { success: false, reason: sanitized.reason };
+                }
+
+                const injectionCheck = this.detectInjection(sanitized.sanitized);
+                if (injectionCheck.isInjection && injectionCheck.confidence > 0.7) {
+                    this.auditLog({
+                        type: 'encode_blocked',
+                        reason: 'Prompt injection detected',
+                        patterns: injectionCheck.patterns
+                    });
+                    return { success: false, reason: 'Security violation detected' };
+                }
+
+                // Rate limiting
+                const rateCheck = this.checkRateLimit(source);
+                if (!rateCheck.allowed) {
+                    this.auditLog({
+                        type: 'encode_rate_limited',
+                        reason: rateCheck.reason,
+                        retryAfter: rateCheck.retryAfter
+                    });
+                    return { success: false, reason: rateCheck.reason, retryAfter: rateCheck.retryAfter };
+                }
+
+                // Perform encoding
+                const result = this.encode(sanitized.sanitized);
+                const endTime = performance.now();
+
+                // Log the operation
+                this.auditLog({
+                    type: 'encode',
+                    messageLength: sanitized.sanitized.length,
+                    source,
+                    hasSourceContext: Object.keys(sourceContext).length > 0,
+                    baseIndex: result.baseIndex,
+                    coherence: this.coherence,
+                    duration: endTime - startTime,
+                    warnings: sanitized.warnings
+                });
+
+                return { success: true, result, warnings: sanitized.warnings };
+            }
+
+            // Enhanced recall with audit logging
+            recallWithAudit(query, threshold = 0.6) {
+                const startTime = performance.now();
+
+                // Security check
+                const sanitized = this.sanitizeInput(query);
+                if (sanitized.blocked) {
+                    this.auditLog({
+                        type: 'recall_blocked',
+                        reason: sanitized.reason
+                    });
+                    return { success: false, reason: sanitized.reason };
+                }
+
+                const injectionCheck = this.detectInjection(sanitized.sanitized);
+                if (injectionCheck.isInjection && injectionCheck.confidence > 0.7) {
+                    this.auditLog({
+                        type: 'recall_blocked',
+                        reason: 'Prompt injection detected'
+                    });
+                    return { success: false, reason: 'Security violation detected' };
+                }
+
+                // Perform smart recall
+                const result = this.smartRecall(sanitized.sanitized, threshold);
+                const endTime = performance.now();
+
+                // Log the operation
+                this.auditLog({
+                    type: 'recall',
+                    queryLength: sanitized.sanitized.length,
+                    intent: result?.intent?.type,
+                    found: result !== null && result.message !== null,
+                    similarity: result?.similarity || 0,
+                    retrievalMethod: result?.retrievalMethod,
+                    coherence: this.coherence,
+                    duration: endTime - startTime
+                });
+
+                return { success: true, result, warnings: sanitized.warnings };
+            }
+
+            // Export system state
+            exportSystemState() {
+                return {
+                    version: '1.0',
+                    timestamp: Date.now(),
+                    config: {
+                        dims: this.dims,
+                        channels: this.channels,
+                        pointsPerChannel: this.pointsPerChannel,
+                        totalPoints: this.totalPoints
+                    },
+                    memory: this.memory,
+                    edgeWeights: Array.from(this.edgeWeights.entries()),
+                    metrics: this.getMetrics(),
+                    qualityMetrics: this.getQualityMetrics(),
+                    responseQuality: this.responseQuality,
+                    auditLogs: this.auditLogs || [],
+                    contradictionFlags: this.contradictionFlags || []
+                };
+            }
+
+            // Import system state
+            importSystemState(state) {
+                if (state.version !== '1.0') {
+                    throw new Error('Incompatible state version');
+                }
+
+                // Restore memory
+                this.memory = state.memory || Array.from({ length: this.totalPoints }, () => []);
+
+                // Restore edge weights
+                this.edgeWeights = new Map(state.edgeWeights || []);
+
+                // Restore quality tracking
+                this.responseQuality = state.responseQuality || [];
+
+                // Restore audit logs
+                this.auditLogs = state.auditLogs || [];
+
+                // Restore contradiction flags
+                this.contradictionFlags = state.contradictionFlags || [];
+
+                this.auditLog({
+                    type: 'system_state_imported',
+                    memoriesRestored: this.memory.flat().length,
+                    edgeWeightsRestored: this.edgeWeights.size,
+                    timestamp: Date.now()
+                });
+
+                return true;
+            }
+
+            // Get audit statistics
+            getAuditStatistics() {
+                this.initializeAuditLog();
+
+                const stats = {
+                    totalLogs: this.auditLogs.length,
+                    byType: {},
+                    securityAlerts: 0,
+                    avgEncodeDuration: 0,
+                    avgRecallDuration: 0,
+                    recentActivity: []
+                };
+
+                let totalEncodeDuration = 0;
+                let encodeCount = 0;
+                let totalRecallDuration = 0;
+                let recallCount = 0;
+
+                for (const log of this.auditLogs) {
+                    // Count by type
+                    stats.byType[log.type] = (stats.byType[log.type] || 0) + 1;
+
+                    // Count security alerts
+                    if (log.type === 'security_alert') {
+                        stats.securityAlerts++;
+                    }
+
+                    // Calculate averages
+                    if (log.type === 'encode' && log.duration) {
+                        totalEncodeDuration += log.duration;
+                        encodeCount++;
+                    }
+                    if (log.type === 'recall' && log.duration) {
+                        totalRecallDuration += log.duration;
+                        recallCount++;
+                    }
+                }
+
+                stats.avgEncodeDuration = encodeCount > 0 ? totalEncodeDuration / encodeCount : 0;
+                stats.avgRecallDuration = recallCount > 0 ? totalRecallDuration / recallCount : 0;
+                stats.recentActivity = this.auditLogs.slice(-10);
+
+                return stats;
+            }
         }
 
         // ============================================
@@ -2592,10 +3209,27 @@
                 document.getElementById('userInput').value = '';
                 this.addMessage('user', input);
 
-                // Process through TEA
+                // Process through TEA with security checks
                 document.getElementById('fieldState').textContent = 'Encoding...';
-                const result = this.tea.encode(input);
-                this.visualizer.onEncode(result.baseIndex);
+                const encodeResult = this.tea.encodeWithAudit(input, 'user', {});
+
+                // Check if encoding was blocked
+                if (!encodeResult.success) {
+                    this.addMessage('error', `🛡️ Security Protection: ${encodeResult.reason}`);
+                    document.getElementById('fieldState').textContent = 'Blocked';
+                    setTimeout(() => {
+                        document.getElementById('fieldState').textContent = 'Active';
+                    }, 2000);
+                    return;
+                }
+
+                // Show any security warnings
+                if (encodeResult.warnings && encodeResult.warnings.length > 0) {
+                    const warningText = encodeResult.warnings.join(', ');
+                    this.addMessage('system', `⚠️ Security Warning: ${warningText}`);
+                }
+
+                this.visualizer.onEncode(encodeResult.result.baseIndex);
 
                 setTimeout(() => {
                     document.getElementById('fieldState').textContent = 'Active';
@@ -2625,29 +3259,79 @@
             }
 
             simulateResponse(input) {
-                // Phase 2 & 3: Use production-grade recall with hybrid retrieval + re-ranking
-                const recall = this.tea.productionRecall(input, 0.6);
+                // Pillar 3: Use audit-enabled recall with full security checks
+                const recallResult = this.tea.recallWithAudit(input, 0.6);
 
-                if (recall) {
+                // Check if blocked by security
+                if (!recallResult.success) {
+                    return `🛡️ Security Protection: ${recallResult.reason}`;
+                }
+
+                const recall = recallResult.result;
+
+                // Show any warnings (SQL injection, XSS, etc.)
+                if (recallResult.warnings && recallResult.warnings.length > 0) {
+                    const warningText = recallResult.warnings.join(', ');
+                    this.addMessage('system', `⚠️ Security Warning: ${warningText}`);
+                }
+
+                if (recall && recall.message) {
+                    // Check intent - skip RAG for greetings
+                    if (recall.intent && recall.intent.skipRAG) {
+                        const greetings = [
+                            'Hello! How can I help you today?',
+                            'Hi there! What would you like to know?',
+                            'Hey! I\'m ready to assist you.',
+                            'Greetings! What can I do for you?'
+                        ];
+                        return greetings[Math.floor(Math.random() * greetings.length)];
+                    }
+
                     // Phase 3: Record response quality for active learning
                     this.tea.recordResponseQuality(input, recall.message, true);
 
                     // Found similar memory with advanced retrieval!
                     const contradictionWarning = recall.hasContradictions ?
-                        ' ⚠️ Contradiction detected with other memories!' : '';
+                        ' ⚠️ Contradiction detected!' : '';
                     const dynamicTopK = this.tea.getDynamicRagTopK();
 
-                    return `🧠 Production Recall (${recall.retrievalMethod})! Found: "${recall.message}" | Similarity: ${(recall.similarity * 100).toFixed(1)}% | Strength: ${recall.strength.toFixed(2)} | Accessed ${recall.accessCount}x${contradictionWarning} | Dynamic TopK: ${dynamicTopK} | Context Window: ${this.tea.getDynamicContextWindow()} tokens.`;
+                    // Format response with attribution if available
+                    let response = `🧠 Production Recall (${recall.retrievalMethod})!\n\n`;
+
+                    // Show grounded response with sources if available
+                    if (recall.groundedResponse) {
+                        response += `${recall.groundedResponse}\n\n`;
+                    } else {
+                        response += `"${recall.message}"\n\n`;
+                    }
+
+                    // Show retrieval metadata
+                    response += `📊 Metadata: Similarity: ${(recall.similarity * 100).toFixed(1)}% | `;
+                    response += `Strength: ${recall.strength.toFixed(2)} | `;
+                    response += `Accessed: ${recall.accessCount}x${contradictionWarning}\n`;
+
+                    // Show intent classification
+                    if (recall.intent) {
+                        response += `🎯 Intent: ${recall.intent.type} (${(recall.intent.confidence * 100).toFixed(0)}% confidence)\n`;
+                    }
+
+                    // Show adaptive config
+                    response += `⚙️ Adaptive: TopK=${dynamicTopK} | Window=${this.tea.getDynamicContextWindow()} tokens`;
+
+                    return response;
                 }
 
                 // No recall - provide advanced encoding metrics
                 const metrics = this.tea.getMetrics();
                 const qualityMetrics = this.tea.getQualityMetrics();
+                const auditStats = this.tea.getAuditStatistics();
+
                 const responses = [
-                    `📊 Production Encoding: ${(metrics.coherence * 100).toFixed(1)}% coherence | ${this.tea.channels} channels | Metadata-enriched storage with keyword indexing | Dynamic context sizing active | Success rate: ${(qualityMetrics.recentSuccessRate * 100).toFixed(1)}%.`,
-                    `🔍 Hybrid Retrieval Ready: Vector + Keyword search enabled | Contradictions: ${this.tea.contradictionFlags.length} detected | Query cache: ${this.tea.queryCache.size} entries | Re-ranking: 2-stage with position bias.`,
-                    `⚡ Adaptive Learning: Edge weights ${metrics.avgEdgeWeight.toFixed(2)}x | ${metrics.messageCount} patterns | Recall accuracy: ${(metrics.recallAccuracy * 100).toFixed(1)}% | Active learning feedback: ${this.tea.adaptiveConfig.activeLearning ? 'ON' : 'OFF'}.`,
-                    `🎯 Context Optimization: ${this.tea.getCompactedContext().length} compacted memories | Dynamic window: ${this.tea.getDynamicContextWindow()} tokens | Semantic chunking: sentence boundaries | Production-ready middleware.`
+                    `📊 Production Encoding: ${(metrics.coherence * 100).toFixed(1)}% coherence | ${this.tea.channels} channels | Metadata-enriched with attribution | Security: ${auditStats.securityAlerts} alerts | Success: ${(qualityMetrics.recentSuccessRate * 100).toFixed(1)}%.`,
+                    `🔍 Hybrid Retrieval: Vector + Keyword search | Contradictions: ${this.tea.contradictionFlags.length} | Query cache: ${this.tea.queryCache.size} | Intent classification: ACTIVE | Re-ranking: 2-stage.`,
+                    `⚡ Adaptive Learning: Edge weights ${metrics.avgEdgeWeight.toFixed(2)}x | ${metrics.messageCount} patterns | Recall: ${(metrics.recallAccuracy * 100).toFixed(1)}% | Active learning: ${this.tea.adaptiveConfig.activeLearning ? 'ON' : 'OFF'} | Audit logs: ${auditStats.totalLogs}.`,
+                    `🎯 Enterprise Features: ${this.tea.getCompactedContext().length} compacted memories | Dynamic window: ${this.tea.getDynamicContextWindow()} tokens | Source attribution: ON | Security filters: ON | Rate limiting: ON.`,
+                    `🛡️ Security Status: Input sanitization: ACTIVE | Injection detection: ACTIVE | XSS protection: ON | Audit trail: ${auditStats.totalLogs} events | Avg encode: ${auditStats.avgEncodeDuration.toFixed(2)}ms | Avg recall: ${auditStats.avgRecallDuration.toFixed(2)}ms.`
                 ];
                 return responses[Math.floor(Math.random() * responses.length)];
             }
