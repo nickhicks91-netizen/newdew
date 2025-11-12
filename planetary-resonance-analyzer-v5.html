@@ -1,11 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
+<!--
+═══════════════════════════════════════════════════════════════════════
+  HRAT Pro v5.0 - Advanced Planetary Resonance Analyzer
+
+  STANDALONE VERSION - Works offline with minimal setup!
+
+  To use completely offline (optional):
+  1. Download three.min.js from:
+     https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js
+  2. Download jspdf.umd.min.js from:
+     https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js
+  3. Place both files in same directory as this HTML file
+  4. Update script src paths below to local files
+
+  This version uses procedural colors only (no external textures).
+  OrbitControls are already inlined - no external dependency!
+═══════════════════════════════════════════════════════════════════════
+-->
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HRAT Pro v5.0 – Advanced Planetary Resonance Analyzer</title>
+<title>HRAT Pro v5.0 – Advanced Planetary Resonance Analyzer (Standalone)</title>
 
 <!-- THREE.js for 3D rendering -->
+<!-- For fully offline use: Download three.min.js from https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js -->
+<!-- and replace this line with: <script src="three.min.js"></script> -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
 
 <!-- OrbitControls - Inlined for reliability -->
@@ -323,7 +343,10 @@ THREE.OrbitControls.prototype = Object.create(THREE.EventDispatcher.prototype);
 THREE.OrbitControls.prototype.constructor = THREE.OrbitControls;
 </script>
 
-<!-- jsPDF for PDF export -->
+<!-- jsPDF for PDF export (optional) -->
+<!-- For fully offline use: Download jspdf.umd.min.js from https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js -->
+<!-- and replace this line with: <script src="jspdf.umd.min.js"></script> -->
+<!-- PDF export will gracefully fail if library not available -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 
 <style>
@@ -820,12 +843,18 @@ footer {
       • 14-16 Hz: 2 bands<br>
       • 50+ Hz: Many thin bands<br>
       • Red = high energy antinodes<br>
-      • Blue = low energy nodes
+      • Blue = low energy nodes<br>
+      <br>
+      <strong>📦 Standalone Version:</strong><br>
+      • No textures - pure colors<br>
+      • OrbitControls inlined<br>
+      • Works offline (with libs)<br>
+      • Single HTML file!
     </div>
   </div>
 </main>
 
-<footer>HRAT Pro © 2025 | SOLOS Institute | v5.0 Wave Physics & Celestial Beauty Edition</footer>
+<footer>HRAT Pro © 2025 | SOLOS Institute | v5.0 Standalone Edition | Works Offline!</footer>
 
 <script>
 "use strict";
@@ -873,10 +902,11 @@ let SCHUMANN_WAVE_SEGMENTS = currentPerformance.SCHUMANN_WAVE_SEGMENTS;
 const MAX_HISTORY_ITEMS = 10;
 
 // ========== PLANETARY DATA WITH FORMATIONS ==========
+// NOTE: All textures removed for standalone operation - using colors only
 const planetaryData = {
   "Earth": {
     radius_km: 6371,
-    texture: "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_atmos_2048.jpg",
+    texture: null, // Removed for standalone - using color instead
     color: 0x4A90E2,
     hasRings: false,
     hasMagnetosphere: true,
@@ -890,7 +920,7 @@ const planetaryData = {
   },
   "Jupiter": {
     radius_km: 69911,
-    texture: "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/jupiter_2k.jpg",
+    texture: null, // Removed for standalone - using color instead
     color: 0xFFB74D,
     hasRings: true,
     ringData: {
@@ -936,7 +966,7 @@ const planetaryData = {
   },
   "Venus": {
     radius_km: 6052,
-    texture: "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/venus_atmosphere.jpg",
+    texture: null, // Removed for standalone - using color instead
     color: 0xFFD54F,
     hasRings: false,
     hasMagnetosphere: false,
@@ -948,7 +978,7 @@ const planetaryData = {
   },
   "Mars": {
     radius_km: 3390,
-    texture: "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/mars_1k_color.jpg",
+    texture: null, // Removed for standalone - using color instead
     color: 0xE57373,
     hasRings: false,
     hasMagnetosphere: false,
@@ -960,7 +990,7 @@ const planetaryData = {
   },
   "Moon": {
     radius_km: 1737,
-    texture: "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/moon_1024.jpg",
+    texture: null, // Removed for standalone - using color instead
     color: 0xB0B0B0,
     hasRings: false,
     hasMagnetosphere: false,
@@ -1938,34 +1968,7 @@ function init3D(bodyData) {
     planetMesh = new THREE.Mesh(geometry, material);
     scene.add(planetMesh);
 
-    // Load texture asynchronously with error handling
-    if (bodyData.texture) {
-      const textureLoader = new THREE.TextureLoader();
-      textureLoader.setCrossOrigin('anonymous');
-
-      textureLoader.load(
-        bodyData.texture,
-        (texture) => {
-          // Success: apply texture
-          if (planetMesh && planetMesh.material) {
-            planetMesh.material.map = texture;
-            planetMesh.material.needsUpdate = true;
-          }
-        },
-        (progress) => {
-          // Progress callback (optional)
-          if (progress.lengthComputable) {
-            const percent = (progress.loaded / progress.total * 100).toFixed(0);
-            console.log(`Loading texture: ${percent}%`);
-          }
-        },
-        (error) => {
-          // Error: fallback to color already set
-          console.warn(`Texture loading failed for ${bodyData.texture}, using color fallback:`, error);
-          showMessage(`Using color fallback for ${bodySelect.value} (texture unavailable)`, 'error');
-        }
-      );
-    }
+    // Standalone version: Using colors only (no textures)
 
     // Create boundary rings (always show these)
     const showLabels = document.getElementById('showLabelsCheck').checked;
