@@ -54,6 +54,10 @@ from .optimization import GRCMOptimizer, create_optimized_model
 
 from .benchmark import GRCMBenchmark, BenchmarkConfig, quick_benchmark
 
+from .logging import MLflowLogger, GRCMExperiment, quick_mlflow_experiment
+
+from .ui import GRCMInterface, create_gradio_ui, launch_ui
+
 from .modules import (
     GroundingLayer,
     HarmonicEmbedding,
@@ -80,6 +84,14 @@ __all__ = [
     'GRCMBenchmark',
     'BenchmarkConfig',
     'quick_benchmark',
+
+    # Logging & Visualization
+    'MLflowLogger',
+    'GRCMExperiment',
+    'quick_mlflow_experiment',
+    'GRCMInterface',
+    'create_gradio_ui',
+    'launch_ui',
 
     # Configuration
     'GRCMConfig',
