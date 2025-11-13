@@ -50,6 +50,10 @@ from .core import ModularGRCM
 
 from .trainer import EchoMirrorTrainer, quick_echo_train
 
+from .optimization import GRCMOptimizer, create_optimized_model
+
+from .benchmark import GRCMBenchmark, BenchmarkConfig, quick_benchmark
+
 from .modules import (
     GroundingLayer,
     HarmonicEmbedding,
@@ -69,6 +73,13 @@ __all__ = [
     'load_config',
     'EchoMirrorTrainer',
     'quick_echo_train',
+
+    # Optimization & Benchmarking
+    'GRCMOptimizer',
+    'create_optimized_model',
+    'GRCMBenchmark',
+    'BenchmarkConfig',
+    'quick_benchmark',
 
     # Configuration
     'GRCMConfig',
